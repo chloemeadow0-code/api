@@ -1,5 +1,16 @@
 const cdpBase = process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222';
-const maxBrowserPages = Math.max(1, Math.min(8, Number(process.env.BROWSER_MAX_TABS || 3) || 3));
+const maxBrowserPages = Math.max(1, Math.min(8, Number(process.env.BROWSER_MAX_TABS || 1) || 1));
+
+export function createSerialBrowserQueue() {
+  let tail = Promise.resolve();
+  return task => {
+    const current = tail.catch(() => {}).then(task);
+    tail = current;
+    return current;
+  };
+}
+
+const runBrowserOperation = createSerialBrowserQueue();
 
 async function pageTargets() {
   const response = await fetch(`${cdpBase}/json/list`, { signal: AbortSignal.timeout(5000) });
@@ -348,7 +359,7 @@ async function recoverTokenWithLoginAction(target, loginOptions, origin) {
   return clicked.token;
 }
 
-export async function accessTokenInBrowser(baseUrl, loginOptions = {}) {
+async function accessTokenInBrowserUnlocked(baseUrl, loginOptions = {}) {
   if (typeof loginOptions === 'string') loginOptions = { actionText: loginOptions };
   loginOptions.ignoredTokens = [...new Set((loginOptions.ignoredTokens || []).map(token => String(token || '').trim()).filter(Boolean))];
   const origin = new URL(baseUrl).origin;
@@ -400,6 +411,10 @@ export async function accessTokenInBrowser(baseUrl, loginOptions = {}) {
   }
 }
 
+export function accessTokenInBrowser(baseUrl, loginOptions = {}) {
+  return runBrowserOperation(() => accessTokenInBrowserUnlocked(baseUrl, loginOptions));
+}
+
 async function waitForOrigin(client, origin) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const result = await client.call('Runtime.evaluate', { expression: '({ origin: location.origin, ready: document.readyState })', returnByValue: true });
@@ -417,7 +432,7 @@ export async function browserAvailable() {
   } catch { return false; }
 }
 
-export async function openBrowserLogin(baseUrl) {
+async function openBrowserLoginUnlocked(baseUrl) {
   const url = new URL(baseUrl).href;
   const origin = new URL(url).origin;
   const existing = (await existingOriginTargets(origin).catch(() => []))[0];
@@ -430,7 +445,11 @@ export async function openBrowserLogin(baseUrl) {
   return { ok: true, url };
 }
 
-export async function checkinInBrowser(baseUrl, endpoint, options = {}) {
+export function openBrowserLogin(baseUrl) {
+  return runBrowserOperation(() => openBrowserLoginUnlocked(baseUrl));
+}
+
+async function checkinInBrowserUnlocked(baseUrl, endpoint, options = {}) {
   const pageUrl = new URL(options.path || '/', baseUrl).href;
   const endpointUrl = new URL(endpoint, baseUrl);
   const target = await cdpTarget(pageUrl);
@@ -503,6 +522,10 @@ export async function checkinInBrowser(baseUrl, endpoint, options = {}) {
   }
 }
 
+export function checkinInBrowser(baseUrl, endpoint, options = {}) {
+  return runBrowserOperation(() => checkinInBrowserUnlocked(baseUrl, endpoint, options));
+}
+
 async function fetchInBrowser(baseUrl, endpoint, method = 'GET', headers = {}, body = '') {
   const target = await cdpTarget(new URL('/', baseUrl).href, { activate: false });
   const client = await connectCdp(target.webSocketDebuggerUrl);
@@ -534,7 +557,7 @@ function responseMessage(data) {
   return typeof message === 'string' ? message : '';
 }
 
-export async function refreshInBrowser(baseUrl, refreshPath) {
+async function refreshInBrowserUnlocked(baseUrl, refreshPath) {
   const value = await fetchInBrowser(baseUrl, refreshPath, 'POST');
   let data;
   try { data = JSON.parse(value.text); } catch { throw new Error(`刷新接口没有返回 JSON (HTTP ${value.status})`); }
@@ -544,7 +567,11 @@ export async function refreshInBrowser(baseUrl, refreshPath) {
   return data;
 }
 
-export async function requestInBrowser(baseUrl, endpoint, method = 'GET', headers = {}, body = '') {
+export function refreshInBrowser(baseUrl, refreshPath) {
+  return runBrowserOperation(() => refreshInBrowserUnlocked(baseUrl, refreshPath));
+}
+
+async function requestInBrowserUnlocked(baseUrl, endpoint, method = 'GET', headers = {}, body = '') {
   const value = await fetchInBrowser(baseUrl, endpoint, method, headers, body);
   let data;
   try {
@@ -564,4 +591,8 @@ export async function requestInBrowser(baseUrl, endpoint, method = 'GET', header
     throw new Error(`${message} (HTTP ${value.status})`);
   }
   return data;
+}
+
+export function requestInBrowser(baseUrl, endpoint, method = 'GET', headers = {}, body = '') {
+  return runBrowserOperation(() => requestInBrowserUnlocked(baseUrl, endpoint, method, headers, body));
 }
