@@ -141,6 +141,13 @@ export function normalizeLoginActionText(value = '') {
   return String(value).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
 }
 
+export function orderBrowserTargetsForRecovery(targets = [], loginFirst = false) {
+  const loginScore = target => /(?:login|sign[-_]?in|auth)/i.test(String(target?.url || '')) ? 1 : 0;
+  return [...targets].sort((left, right) => loginFirst
+    ? loginScore(right) - loginScore(left)
+    : loginScore(left) - loginScore(right));
+}
+
 function storedTokenExpression() {
   return `(() => {
     const tokenPattern = /^(?:eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+|[A-Za-z0-9_-]{24,})$/;
@@ -197,7 +204,7 @@ async function tokenFromTarget(target, reload = false, ignoredTokens = []) {
     });
     const offResponse = responseTokenListener(client, finish, ignoredTokens);
     await client.call('Page.reload', { ignoreCache: true });
-    const token = await Promise.race([captured, new Promise(resolve => setTimeout(() => resolve(''), 6000))]);
+    const token = await Promise.race([captured, new Promise(resolve => setTimeout(() => resolve(''), 10000))]);
     off();
     offResponse();
     return token;
@@ -368,22 +375,23 @@ async function accessTokenInBrowserUnlocked(baseUrl, loginOptions = {}) {
     const token = await tokenFromTarget(target, false, loginOptions.ignoredTokens);
     if (token) return token;
   }
-  const ordered = [...existing].sort((left, right) => {
-    const score = target => /(?:login|sign[-_]?in|auth)/i.test(String(target.url || '')) ? 1 : 0;
-    return score(right) - score(left);
-  });
+  const loggedInCandidates = orderBrowserTargetsForRecovery(existing);
+  const loginCandidates = orderBrowserTargetsForRecovery(existing, true);
   const freshAutomatedLogin = Boolean(loginOptions.actionText && (
     (loginOptions.username && loginOptions.password) || loginOptions.nextActionText
   ));
-  if (loginOptions.actionText && !freshAutomatedLogin) {
-    for (const target of ordered.slice(0, 3)) {
-      const token = await recoverTokenWithLoginAction(target, loginOptions, origin);
-      if (token) return token;
-    }
+
+  // A configured auto-login does not mean the current browser session is
+  // logged out. Reload the existing dashboard first so its refresh request or
+  // normal API calls can expose the current access token. Only fall back to the
+  // login form when the established session really cannot produce a token.
+  for (const target of loggedInCandidates.slice(0, 3)) {
+    const token = await tokenFromTarget(target, true, loginOptions.ignoredTokens);
+    if (token) return token;
   }
-  if (!freshAutomatedLogin) {
-    for (const target of ordered.slice(0, 3)) {
-      const token = await tokenFromTarget(target, true, loginOptions.ignoredTokens);
+  if (loginOptions.actionText && !freshAutomatedLogin) {
+    for (const target of loginCandidates.slice(0, 3)) {
+      const token = await recoverTokenWithLoginAction(target, loginOptions, origin);
       if (token) return token;
     }
   }

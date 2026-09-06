@@ -34,6 +34,8 @@ Bearer 自动刷新会识别 HTTP 401、403，以及常见的 Unauthorized、inv
 
 对刷新会话绑定登录 IP 的站点，可在“自定义 JSON API”中把续期方式改为“服务器浏览器”。保存后在站点卡片点击“浏览器登录”，进入受管理员会话保护的远程 Chromium，并在里面登录该站一次。浏览器资料保存在 `/data/browser-profile`；之后该站遇到 401 时，会在同一服务器浏览器内刷新 Bearer，还会从浏览器登录存储或网页实际请求中捕获最新 Access Token 并加密保存；恢复失败时会再自动重试两次，任一次成功就立即停止。只需为确实需要的站点启用，其他站点继续使用轻量的普通接口刷新。
 
+即使站点配置了自动登录账号，恢复时也会先复用并刷新当前已经登录的页面，从登录后的接口请求或刷新响应中提取令牌；只有当前登录态确实无法产生令牌时，才会进入登录页重新填写账号密码。
+
 服务器浏览器默认只保留 1 个页面、只执行 1 个浏览器任务，重复打开同一站点会复用已有页面，自动登录产生的临时页面会在结束后回收，避免批量签到、后台轮询和多次 401 重试同时挤占内存。可通过 `BROWSER_MAX_TABS` 调整保留页数，通过 `BROWSER_RENDERER_PROCESS_LIMIT` 调整 Chromium 渲染进程上限。
 
 GitHub OAuth 两步登录可在 `BROWSER_LOGIN_ACCOUNTS_JSON` 的对应站点中设置 `{"action":"Sign in","nextAction":"Continue with GitHub"}`。单站环境变量对应为 `BROWSER_LOGIN_ACTION=Sign in` 和 `BROWSER_LOGIN_NEXT_ACTION=Continue with GitHub`。服务器浏览器中的 GitHub 账号仍需人工登录一次；之后站点退出时会自动依次点击这两个按钮并复用 GitHub 登录态。

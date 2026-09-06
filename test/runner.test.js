@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, normalizeLoginActionText } from '../src/browser.js';
+import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, normalizeLoginActionText, orderBrowserTargetsForRecovery } from '../src/browser.js';
 import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
 
 test('reads rotated bearer credentials from refresh responses', () => {
@@ -102,6 +102,15 @@ test('server browser operations run one at a time', async () => {
   });
   await Promise.all([first, second]);
   assert.deepEqual(events, ['first-start', 'first-end', 'second-start', 'second-end']);
+});
+
+test('server browser checks the logged-in page before the login page', () => {
+  const targets = [
+    { id: 'login', url: 'https://example.com/auth/sign-in' },
+    { id: 'dashboard', url: 'https://example.com/dashboard' }
+  ];
+  assert.deepEqual(orderBrowserTargetsForRecovery(targets).map(target => target.id), ['dashboard', 'login']);
+  assert.deepEqual(orderBrowserTargetsForRecovery(targets, true).map(target => target.id), ['login', 'dashboard']);
 });
 
 test('loads browser login credentials from scoped environment variables', () => {
