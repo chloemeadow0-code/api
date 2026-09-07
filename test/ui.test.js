@@ -88,6 +88,8 @@ test('server browser routes require the admin session', () => {
   assert.match(startup, /\/data\/browser-profile/);
   assert.match(startup, /SingletonLock/);
   assert.match(startup, /json\/version/);
+  assert.match(startup, /browser_watchdog/);
+  assert.match(startup, /restarting in 5 seconds/);
   assert.match(startup, /x11vnc .* -localhost/);
   assert.match(browser, /formReadyExpression/);
   assert.match(browser, /if \(closeWhenDone\) await closeTarget/);

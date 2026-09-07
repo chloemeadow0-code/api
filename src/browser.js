@@ -12,8 +12,17 @@ export function createSerialBrowserQueue() {
 
 const runBrowserOperation = createSerialBrowserQueue();
 
+export async function retryBrowserConnection(task, attempts = 12, delayMs = 500) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await task(); } catch (error) { lastError = error; }
+    if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  throw lastError;
+}
+
 async function pageTargets() {
-  const response = await fetch(`${cdpBase}/json/list`, { signal: AbortSignal.timeout(5000) });
+  const response = await retryBrowserConnection(() => fetch(`${cdpBase}/json/list`, { signal: AbortSignal.timeout(5000) }));
   if (!response.ok) return [];
   const targets = await response.json();
   return targets.filter(target => target.type === 'page' && target.id && target.webSocketDebuggerUrl);
@@ -40,7 +49,7 @@ async function pruneBrowserTargets(keepIds = []) {
 async function cdpTarget(url, { activate = true } = {}) {
   let response;
   try {
-    response = await fetch(`${cdpBase}/json/new?${encodeURIComponent(url)}`, { method: 'PUT', signal: AbortSignal.timeout(10000) });
+    response = await retryBrowserConnection(() => fetch(`${cdpBase}/json/new?${encodeURIComponent(url)}`, { method: 'PUT', signal: AbortSignal.timeout(10000) }));
   } catch (error) {
     throw new Error(`服务器浏览器未启动：${error.cause?.code || error.message}`);
   }
