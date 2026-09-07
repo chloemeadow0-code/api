@@ -106,12 +106,12 @@ export function isAuthenticationError(error) {
 
 export async function retryTwice(task, delayMs = 0, shouldRetry = () => true) {
   let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try { return await task(attempt); } catch (error) {
       lastError = error;
       if (!shouldRetry(error)) throw error;
     }
-    if (attempt < 2 && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    if (attempt < 1 && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   throw lastError;
 }
@@ -262,7 +262,7 @@ async function recoverAuthentication(account, endpoint, method, panelType, retri
     } catch (error) {
       if (isRateLimitedError(error)) throw new Error(`站点请求过于频繁 (HTTP 429)，已停止自动重试，请稍后再试`);
       const details = refreshError ? `；刷新接口：${refreshError.message}` : '';
-      throw new Error(`服务器浏览器登录态无效，自动重试两次后仍未取得可用令牌，请点击“浏览器登录”重新登录：${error.message}${details}`);
+      throw new Error(`服务器浏览器登录态无效，最多尝试两次后仍未取得可用令牌，请点击“浏览器登录”重新登录：${error.message}${details}`);
     }
   }
   if (refreshError) throw refreshError;

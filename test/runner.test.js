@@ -31,19 +31,26 @@ test('uses the persistent server browser as a fallback for generic session accou
   assert.equal(shouldUseBrowserSession({ refreshMode: 'browser' }, 'generic', false, false), false);
 });
 
-test('browser recovery retries twice and stops immediately after success', async () => {
+test('browser recovery makes at most two attempts and stops immediately after success', async () => {
   let attempts = 0;
   const result = await retryTwice(async () => {
     attempts++;
-    if (attempts < 3) throw new Error('temporary login failure');
+    if (attempts < 2) throw new Error('temporary login failure');
     return 'ok';
   });
   assert.equal(result, 'ok');
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 2);
 
   attempts = 0;
   assert.equal(await retryTwice(async () => { attempts++; return 'ready'; }), 'ready');
   assert.equal(attempts, 1);
+
+  attempts = 0;
+  await assert.rejects(() => retryTwice(async () => {
+    attempts++;
+    throw new Error('still empty');
+  }), /still empty/);
+  assert.equal(attempts, 2);
 });
 
 test('browser recovery never retries HTTP 429 rate limits', async () => {
