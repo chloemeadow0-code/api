@@ -40,6 +40,11 @@ export function browserTargetIdsToClose(targets = [], keepIds = [], maximum = 3)
   return pages.filter(target => !survivors.has(target.id)).map(target => target.id);
 }
 
+export function isLastBrowserPage(targets = [], id = '') {
+  const pages = targets.filter(target => target?.type === 'page' && target.id);
+  return pages.length === 1 && pages[0].id === id;
+}
+
 async function pruneBrowserTargets(keepIds = []) {
   const targets = await pageTargets().catch(() => []);
   const ids = browserTargetIdsToClose(targets, keepIds, maxBrowserPages);
@@ -61,6 +66,11 @@ async function cdpTarget(url, { activate = true } = {}) {
 }
 
 async function closeTarget(id) {
+  // Closing Chromium's last page also closes its last window and can terminate
+  // the entire browser process. Keep that page alive; the next operation will
+  // reuse or replace it while still respecting the configured page cap.
+  const targets = await pageTargets().catch(() => []);
+  if (isLastBrowserPage(targets, id)) return;
   await fetch(`${cdpBase}/json/close/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
 }
 

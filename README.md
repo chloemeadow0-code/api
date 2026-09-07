@@ -38,6 +38,8 @@ Bearer 自动刷新会识别 HTTP 401、403，以及常见的 Unauthorized、inv
 
 服务器浏览器默认只保留 1 个页面、只执行 1 个浏览器任务，重复打开同一站点会复用已有页面，自动登录产生的临时页面会在结束后回收，避免批量签到、后台轮询和多次 401 重试同时挤占内存。可通过 `BROWSER_MAX_TABS` 调整保留页数，通过 `BROWSER_RENDERER_PROCESS_LIMIT` 调整 Chromium 渲染进程上限。
 
+回收临时页面时会始终保留 Chromium 的最后一个页面，避免关闭最后窗口导致浏览器退出、黑屏并被守护任务反复重启。
+
 Chromium 进程意外退出时，容器内的守护任务会在 5 秒后自动重新启动；浏览器操作会短暂等待重启完成，避免瞬时返回 `ECONNREFUSED`。这只能恢复浏览器子进程；如果整个容器因内存不足被平台驱逐，仍需由部署平台重新启动容器。
 
 GitHub OAuth 两步登录可在 `BROWSER_LOGIN_ACCOUNTS_JSON` 的对应站点中设置 `{"action":"Sign in","nextAction":"Continue with GitHub"}`。单站环境变量对应为 `BROWSER_LOGIN_ACTION=Sign in` 和 `BROWSER_LOGIN_NEXT_ACTION=Continue with GitHub`。服务器浏览器中的 GitHub 账号仍需人工登录一次；之后站点退出时会自动依次点击这两个按钮并复用 GitHub 登录态。
