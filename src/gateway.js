@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { decrypt, readStore, writeStore } from './store.js';
 import { modelApiUrl, shouldPoll } from './runner.js';
+import { chatCompletionResponse, responsesToChatBody, simplifiedChatBody } from './responses-compat.js';
 
 function authorized(req) {
   const expected = process.env.GATEWAY_API_KEY || '';
@@ -219,6 +220,44 @@ async function upstreamRequest(account, endpoint, body) {
   });
 }
 
+function shouldUseResponsesCompatibility(status) {
+  return [400, 404, 405, 415, 422, 501].includes(Number(status));
+}
+
+async function responsesViaChat(account, originalBody) {
+  const chatBody = responsesToChatBody(originalBody, account.modelName);
+  let response = await upstreamRequest(account, '/v1/chat/completions', chatBody);
+  if (!response.ok && [400, 422].includes(response.status)) {
+    try { await readResponsePrefix(response); } catch {}
+    response = await upstreamRequest(account, '/v1/chat/completions', simplifiedChatBody(chatBody, account.modelName));
+  }
+  if (!response.ok) {
+    let responseText = '';
+    try { responseText = await readResponsePrefix(response); } catch {}
+    return { response: null, error: summarizeUpstreamError(response.status, responseText), status: response.status };
+  }
+  let responseText = '';
+  try { responseText = await readResponsePrefix(response, 4 * 1024 * 1024); }
+  catch (error) { return { response: null, error: `Chat 兼容响应读取失败：${redactUpstreamText(error.message).slice(0, 300)}`, status: response.status }; }
+  if (!hasMeaningfulModelResponse(responseText, '/v1/chat/completions')) return { response: null, error: `HTTP ${response.status} · Chat 兼容接口也没有返回模型内容`, status: response.status };
+  let data;
+  try { data = JSON.parse(responseText); }
+  catch { return { response: null, error: `HTTP ${response.status} · Chat 兼容接口没有返回有效 JSON`, status: response.status }; }
+  return { response: chatCompletionResponse(data, originalBody), error: '', status: response.status };
+}
+
+async function simplifiedChatAttempt(account, originalBody) {
+  const response = await upstreamRequest(account, '/v1/chat/completions', simplifiedChatBody(originalBody, account.modelName));
+  if (!response.ok) {
+    let responseText = '';
+    try { responseText = await readResponsePrefix(response); } catch {}
+    return { response: null, error: summarizeUpstreamError(response.status, responseText), status: response.status };
+  }
+  const checked = await validateSuccessfulResponse(response, '/v1/chat/completions');
+  if (!checked.valid) return { response: null, error: `HTTP ${response.status} · 精简参数后仍然没有返回模型内容`, status: response.status };
+  return { response: checked.response, error: '', status: response.status };
+}
+
 function forward(response, res, onComplete = () => {}) {
   res.status(response.status);
   for (const name of ['content-type', 'cache-control', 'x-request-id']) {
@@ -265,6 +304,22 @@ export function installGateway(app) {
             let responseText = '';
             try { responseText = await readResponsePrefix(response); } catch {}
             const upstreamError = summarizeUpstreamError(response.status, responseText);
+            if (endpoint === '/v1/chat/completions' && [400, 422].includes(response.status)) {
+              const compatible = await simplifiedChatAttempt(account, req.body);
+              if (compatible.response) return forward(compatible.response, res, text => recordGatewayRun(account, 'ok', `精简不兼容参数后成功 · HTTP ${compatible.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status, endpoint, upstreamEndpoint: endpoint, adapterLabel: 'Chat 参数精简', adapted: true, ...extractUsage(text) }));
+              const combinedError = `${upstreamError}；精简参数重试失败：${compatible.error}`;
+              errors.push(`${account.name}: ${combinedError}`);
+              recordGatewayRun(account, 'error', `${combinedError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status || response.status, endpoint, upstreamEndpoint: endpoint, adapterLabel: 'Chat 参数精简', adapted: true, upstreamError: combinedError });
+              continue;
+            }
+            if (endpoint === '/v1/responses' && shouldUseResponsesCompatibility(response.status)) {
+              const compatible = await responsesViaChat(account, req.body);
+              if (compatible.response) return forward(compatible.response, res, text => recordGatewayRun(account, 'ok', `Responses 已转为 Chat · HTTP ${compatible.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status, endpoint, upstreamEndpoint: '/v1/chat/completions', adapterLabel: 'Responses → Chat', adapted: true, ...extractUsage(text) }));
+              const combinedError = `${upstreamError}；Chat 兼容失败：${compatible.error}`;
+              errors.push(`${account.name}: ${combinedError}`);
+              recordGatewayRun(account, 'error', `${combinedError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status || response.status, endpoint, upstreamEndpoint: '/v1/chat/completions', adapterLabel: 'Responses → Chat', adapted: true, upstreamError: combinedError });
+              continue;
+            }
             errors.push(`${account.name}: ${upstreamError}`);
             recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, upstreamError });
             continue;
@@ -273,6 +328,14 @@ export function installGateway(app) {
           if (!checked.valid) {
             const reported = summarizeUpstreamError(response.status, checked.preview);
             const upstreamError = `${reported}${reported === `HTTP ${response.status}` ? '' : ' ·'} 上游未返回模型内容`;
+            if (endpoint === '/v1/responses') {
+              const compatible = await responsesViaChat(account, req.body);
+              if (compatible.response) return forward(compatible.response, res, text => recordGatewayRun(account, 'ok', `Responses 空回后已转为 Chat · HTTP ${compatible.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status, endpoint, upstreamEndpoint: '/v1/chat/completions', adapterLabel: 'Responses → Chat', adapted: true, ...extractUsage(text) }));
+              const combinedError = `${upstreamError}；Chat 兼容失败：${compatible.error}`;
+              errors.push(`${account.name}: ${combinedError}`);
+              recordGatewayRun(account, 'error', `${combinedError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: compatible.status || response.status, endpoint, upstreamEndpoint: '/v1/chat/completions', adapterLabel: 'Responses → Chat', adapted: true, upstreamError: combinedError, ...extractUsage(checked.preview) });
+              continue;
+            }
             errors.push(`${account.name}: ${upstreamError}`);
             recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, upstreamError, ...extractUsage(checked.preview) });
             continue;
