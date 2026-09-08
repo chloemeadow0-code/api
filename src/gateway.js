@@ -58,6 +58,51 @@ export function appendBoundedTail(current = Buffer.alloc(0), chunk = Buffer.allo
   return next.length > maximum ? next.subarray(next.length - maximum) : next;
 }
 
+function redactUpstreamText(value = '') {
+  return String(value)
+    .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [已隐藏]')
+    .replace(/\b(?:sk|sess|token)-[A-Za-z0-9._-]{12,}\b/gi, '[已隐藏]')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function summarizeUpstreamError(status, text = '', maximum = 360) {
+  let detail = '';
+  try {
+    const data = JSON.parse(String(text));
+    const candidates = [data?.error?.message, data?.message, data?.msg, data?.detail, typeof data?.error === 'string' ? data.error : ''];
+    detail = candidates.find(value => typeof value === 'string' && value.trim()) || '';
+  } catch {
+    const title = String(text).match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+    detail = title || (!/<[a-z][\s\S]*>/i.test(String(text)) ? text : '');
+  }
+  detail = redactUpstreamText(detail);
+  if (detail.length > maximum) detail = `${detail.slice(0, maximum - 1)}…`;
+  return `HTTP ${status}${detail ? ` · ${detail}` : ''}`;
+}
+
+async function readResponsePrefix(response, maximum = 16384) {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (size < maximum) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      const remaining = maximum - size;
+      chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk);
+      size += Math.min(chunk.length, remaining);
+      if (chunk.length > remaining || size >= maximum) break;
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 function candidates() {
   const db = readStore();
   return selectGatewayCandidates(db);
@@ -134,15 +179,18 @@ export function installGateway(app) {
         try {
           const response = await upstreamRequest(account, endpoint, rewriteGatewayBody(req.body, account, endpoint));
           if (!response.ok) {
-            errors.push(`${account.name}: HTTP ${response.status}`);
-            recordGatewayRun(account, 'error', `HTTP ${response.status}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint });
-            await response.arrayBuffer();
+            let responseText = '';
+            try { responseText = await readResponsePrefix(response); } catch {}
+            const upstreamError = summarizeUpstreamError(response.status, responseText);
+            errors.push(`${account.name}: ${upstreamError}`);
+            recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, upstreamError });
             continue;
           }
           return forward(response, res, text => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, ...extractUsage(text) }));
         } catch (error) {
-          errors.push(`${account.name}: ${error.message}`);
-          recordGatewayRun(account, 'error', `${error.message}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, endpoint });
+          const upstreamError = redactUpstreamText(error.message).slice(0, 360);
+          errors.push(`${account.name}: ${upstreamError}`);
+          recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, endpoint, upstreamError });
         }
       }
       res.status(502).json({ error: { message: `All upstreams failed: ${errors.join('; ')}`, type: 'upstream_error' } });

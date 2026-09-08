@@ -329,7 +329,7 @@ window.loadLogs = async () => {
       const action = run.action === 'gateway' ? '网关' : run.action === 'checkin' ? '签到' : '轮询';
       const result = run.status === 'ok' ? '成功' : run.status === 'already' ? '已签到' : '失败';
       const usage = Number.isFinite(run.totalTokens) ? `输入 ${run.inputTokens || 0} · 输出 ${run.outputTokens || 0} · 缓存 ${run.cachedTokens || 0} · 总计 ${run.totalTokens}` : '';
-      const details = [run.modelName, usage, Number.isFinite(run.latencyMs) ? `${run.latencyMs} ms` : '', run.statusCode ? `HTTP ${run.statusCode}` : ''].filter(Boolean).join(' · ');
+      const details = [run.modelName, usage, Number.isFinite(run.latencyMs) ? `${run.latencyMs} ms` : '', run.statusCode && !run.upstreamError ? `HTTP ${run.statusCode}` : '', run.upstreamError || ''].filter(Boolean).join(' · ');
       return `<article><time>${new Date(run.startedAt).toLocaleString()}</time><strong>${esc(run.accountName)}</strong><span class="log-kind">${action}</span><span class="${run.status}">${result}</span><p>${esc(details || run.message || '—')}</p></article>`;
     }).join('') || '<p>当前筛选下没有日志。</p>';
   } catch (error) { alert(`日志加载失败：${error.message}`); }

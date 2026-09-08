@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { appendBoundedTail, extractUsage, installGateway, rewriteGatewayBody, selectGatewayCandidates } from '../src/gateway.js';
+import { appendBoundedTail, extractUsage, installGateway, rewriteGatewayBody, selectGatewayCandidates, summarizeUpstreamError } from '../src/gateway.js';
 
 test('gateway ignores the client model and uses polling sites in saved order', () => {
   const db = {
@@ -28,6 +28,12 @@ test('gateway audit keeps only a bounded response tail', () => {
   let tail = appendBoundedTail(Buffer.alloc(0), Buffer.from('1234'), 6);
   tail = appendBoundedTail(tail, Buffer.from('56789'), 6);
   assert.equal(tail.toString(), '456789');
+});
+
+test('gateway exposes a short safe upstream error reason', () => {
+  assert.equal(summarizeUpstreamError(503, JSON.stringify({ error: { message: 'Service overloaded' } })), 'HTTP 503 · Service overloaded');
+  assert.equal(summarizeUpstreamError(403, '<!doctype html><title>Security Verification</title><p>blocked</p>'), 'HTTP 403 · Security Verification');
+  assert.equal(summarizeUpstreamError(401, JSON.stringify({ message: 'bad Bearer secret-value and sk-abcdefghijklmnopqrstuvwxyz' })), 'HTTP 401 · bad Bearer [已隐藏] and [已隐藏]');
 });
 
 test('gateway rejects requests when its client key is missing', async () => {

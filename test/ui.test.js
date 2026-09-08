@@ -163,6 +163,7 @@ test('batch actions visibly run tagged sites one by one', () => {
 test('run logs distinguish gateway traffic', () => {
   const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(source, /run\.action === 'gateway' \? '网关'/);
+  assert.match(source, /run\.upstreamError/);
 });
 
 test('left navigation opens a real gateway statistics module', () => {
