@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildOneConnectorPriceLeaders, buildOneConnectorTokenPriceLeaders, buildPriceLeaders, buildSitePrices, buildTokenPriceLeaders, canonicalModelName, comparableModelName, normalizedPerCallPrice, normalizedTokenPrice, oneConnectorModelName, priceAlertsView, priceScanCandidates, updatePinnedPriceAlerts, updatePriceWatchState } from '../src/price-alerts.js';
+import { buildModelPriceCatalog, buildOneConnectorPriceLeaders, buildOneConnectorTokenPriceLeaders, buildPriceLeaders, buildSitePrices, buildTokenPriceLeaders, canonicalModelName, comparableModelName, normalizedPerCallPrice, normalizedTokenPrice, oneConnectorModelName, priceAlertsView, priceScanCandidates, updatePinnedPriceAlerts, updatePriceWatchState } from '../src/price-alerts.js';
 
 test('price leaders compare only the same exact model name', () => {
   const accounts = [
@@ -64,6 +64,21 @@ test('site price lists keep each site available for filtering', () => {
   assert.equal(prices.length, 2);
   assert.equal(prices.find(item => item.accountId === 'a').priceUsd, 0.02);
   assert.equal(prices.find(item => item.accountId === 'b').priceUsd, 0.01);
+});
+
+test('all-site model search catalog keeps every normalized call and token quote', () => {
+  const prices = buildModelPriceCatalog([
+    { id: 'a', name: 'A', quotaPerUnit: 500000, modelsCheckedAt: '2026-09-08T00:00:00Z', models: [{ name: 'gpt-5.5-free', billing: 'call', price: 10000, priceUnit: 'quota' }] },
+    { id: 'b', name: 'B', models: [{ name: 'GPT-5.5-fast', billing: 'token', inputPriceUsd: 1.5, outputPriceUsd: 9 }] }
+  ]);
+  assert.equal(prices.length, 2);
+  const callPrice = prices.find(item => item.billing === 'call');
+  const tokenPrice = prices.find(item => item.billing === 'token');
+  assert.equal(callPrice.priceUsd, 0.02);
+  assert.equal(callPrice.checkedAt, '2026-09-08T00:00:00Z');
+  assert.equal(tokenPrice.canonicalName, 'gpt-5.5-fast');
+  assert.equal(tokenPrice.priceUsd, 1.5);
+  assert.equal(tokenPrice.outputPriceUsd, 9);
 });
 
 test('quota prices are normalized to dollars before comparison', () => {

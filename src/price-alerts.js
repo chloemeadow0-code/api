@@ -137,6 +137,28 @@ export function buildSitePrices(accounts = []) {
   return [...prices.values()].sort((a, b) => a.accountName.localeCompare(b.accountName) || a.comparisonName.localeCompare(b.comparisonName));
 }
 
+export function buildModelPriceCatalog(accounts = []) {
+  const prices = [];
+  for (const account of accounts) {
+    for (const model of account.models || []) {
+      const billing = model.billing === 'token' ? 'token' : 'call';
+      const price = normalizedModelPrice(account, model, billing);
+      const modelName = String(model.name || '').trim();
+      if (!modelName || !price) continue;
+      prices.push({
+        billing,
+        modelName,
+        canonicalName: canonicalModelName(modelName),
+        ...price,
+        accountId: account.id,
+        accountName: account.name,
+        checkedAt: account.modelsCheckedAt || null
+      });
+    }
+  }
+  return prices.sort((a, b) => a.canonicalName.localeCompare(b.canonicalName) || comparePrices(a, b) || a.accountName.localeCompare(b.accountName));
+}
+
 function watchFields(scope = 'precise', billing = 'call') {
   const broad = scope === 'broad';
   if (billing === 'token') return {
@@ -256,6 +278,7 @@ export function priceAlertsView(db = readStore()) {
     broadLeaders: Object.values(watch.broadLeaders || {}).sort((a, b) => a.modelName.localeCompare(b.modelName)),
     tokenLeaders: Object.values(watch.tokenLeaders || {}).sort((a, b) => a.modelName.localeCompare(b.modelName)),
     tokenBroadLeaders: Object.values(watch.tokenBroadLeaders || {}).sort((a, b) => a.modelName.localeCompare(b.modelName)),
+    modelPrices: buildModelPriceCatalog(db.accounts || []),
     sitePrices,
     sites: [...siteNames].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
     alerts,

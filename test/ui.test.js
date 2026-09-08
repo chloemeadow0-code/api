@@ -199,6 +199,10 @@ test('left navigation includes unread per-call price alerts', () => {
   assert.match(html, />按次</);
   assert.match(html, />按量</);
   assert.match(html, /id="priceScopeFilter"/);
+  assert.match(html, /全站模型最低价查询/);
+  assert.match(html, /id="priceModelSearch"/);
+  assert.match(html, /id="priceModelSearchResults"/);
+  assert.doesNotMatch(html, /id="priceModelFilter"/);
   assert.match(html, />一个连接符</);
   assert.match(html, />两个连接符</);
   assert.match(html, /清除未加精/);
@@ -206,6 +210,8 @@ test('left navigation includes unread per-call price alerts', () => {
   assert.match(source, /togglePriceAlertPin/);
   assert.match(source, /dismissPriceAlert/);
   assert.match(source, /setPriceAlertBadge/);
+  assert.match(source, /renderPriceModelSearch/);
+  assert.match(source, /priceAlertData\.modelPrices/);
 });
 
 test('left navigation includes invitation usage alerts', () => {

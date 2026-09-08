@@ -167,8 +167,14 @@ function usdPerToken(inputValue, outputValue) {
   const output = outputValue === null || outputValue === undefined ? NaN : Number(outputValue);
   if (!Number.isFinite(input)) return '—';
   const shownOutput = Number.isFinite(output) ? output : input;
-  const format = value => value < 0.0001 && value !== 0 ? value.toFixed(8) : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-  return `输入 $${format(input)} / 1M · 输出 $${format(shownOutput)} / 1M`;
+  return `输入 ${usdPerMillion(input)} · 输出 ${usdPerMillion(shownOutput)}`;
+}
+
+function usdPerMillion(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  const formatted = amount < 0.0001 && amount !== 0 ? amount.toFixed(8) : amount.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  return `$${formatted} / 1M`;
 }
 
 function watchedPrice(item, state = 'new') {
@@ -176,6 +182,34 @@ function watchedPrice(item, state = 'new') {
   const output = item[`${state}OutputPriceUsd`];
   return (item.billing || 'call') === 'token' ? usdPerToken(input, output) : usdPerCall(input);
 }
+
+window.renderPriceModelSearch = () => {
+  if (!priceAlertData) return;
+  const query = String($('#priceModelSearch').value || '').trim().toLowerCase();
+  const results = $('#priceModelSearchResults');
+  if (!query) {
+    results.innerHTML = '<p>输入模型名称后查看全站最低价。</p>';
+    return;
+  }
+  const matches = (priceAlertData.modelPrices || []).filter(item => String(item.canonicalName || item.modelName || '').includes(query));
+  if (!matches.length) {
+    results.innerHTML = '<p>当前模型目录里没有找到匹配报价，可先点“立即扫描”更新各站数据。</p>';
+    return;
+  }
+  const lowest = (billing, field) => matches
+    .filter(item => item.billing === billing && Number.isFinite(Number(item[field])))
+    .sort((a, b) => Number(a[field]) - Number(b[field]) || a.accountName.localeCompare(b.accountName))[0];
+  const cards = [
+    { label: '按次最低', item: lowest('call', 'priceUsd'), format: item => usdPerCall(item.priceUsd) },
+    { label: '输入最低', item: lowest('token', 'priceUsd'), format: item => usdPerMillion(item.priceUsd) },
+    { label: '输出最低', item: lowest('token', 'outputPriceUsd'), format: item => usdPerMillion(item.outputPriceUsd) }
+  ];
+  const siteCount = new Set(matches.map(item => item.accountId)).size;
+  const modelCount = new Set(matches.map(item => item.canonicalName || item.modelName)).size;
+  results.innerHTML = `<p class="price-search-summary">找到 ${modelCount} 个模型、${matches.length} 条报价，来自 ${siteCount} 个站点。</p><div class="price-search-cards">${cards.map(({ label, item, format }) => item
+    ? `<article><span>${label}</span><strong>${esc(format(item))}</strong><b>${esc(item.modelName)}</b><small>${esc(item.accountName)}</small></article>`
+    : `<article class="empty"><span>${label}</span><strong>暂无</strong><small>没有这种计费方式</small></article>`).join('')}</div>`;
+};
 
 window.renderPriceAlerts = () => {
   if (!priceAlertData) return;
@@ -186,8 +220,7 @@ window.renderPriceAlerts = () => {
   const activeSite = siteSelect.value;
   const activeBilling = $('#priceBillingFilter').value;
   const activeScope = $('#priceScopeFilter').value;
-  const filter = String($('#priceModelFilter').value || '').trim().toLowerCase();
-  const alerts = priceAlertData.alerts.filter(item => (!activeSite || item.accountId === activeSite || item.currentAccountId === activeSite) && (!activeBilling || (item.billing || 'call') === activeBilling) && (!activeScope || (item.scope || 'precise') === activeScope) && (!filter || `${item.comparisonName || ''} ${item.modelName} ${item.currentModelName || ''}`.toLowerCase().includes(filter)));
+  const alerts = priceAlertData.alerts.filter(item => (!activeSite || item.accountId === activeSite || item.currentAccountId === activeSite) && (!activeBilling || (item.billing || 'call') === activeBilling) && (!activeScope || (item.scope || 'precise') === activeScope));
   const callLeaderCount = (priceAlertData.leaders?.length || 0) + (priceAlertData.broadLeaders?.length || 0);
   const tokenLeaderCount = (priceAlertData.tokenLeaders?.length || 0) + (priceAlertData.tokenBroadLeaders?.length || 0);
   $('#priceLeaderCount').textContent = (activeBilling === 'call' ? callLeaderCount : activeBilling === 'token' ? tokenLeaderCount : callLeaderCount + tokenLeaderCount).toLocaleString();
@@ -198,6 +231,7 @@ window.renderPriceAlerts = () => {
   $('#priceScanHint').textContent = priceAlertData.lastScan
     ? `本次已在后台尝试全部 ${priceAlertData.lastScan.monitored} 个启用站点，成功刷新 ${priceAlertData.lastScan.refreshed} 个${priceAlertData.lastScan.failed ? `，${priceAlertData.lastScan.failed} 个失败` : ''}。认证失败不会启动浏览器；按量以输入价格为主、输出价格为次进行比较。`
     : '按次与按量的两套规则首次扫描都只建立价格基准，不产生提醒；自动扫描不会启动浏览器登录。';
+  renderPriceModelSearch();
   $('#priceAlertHistory').innerHTML = alerts.map(item => {
     const watchText = item.pinned
       ? item.watchStatus === 'missing' ? '当前已消失'
