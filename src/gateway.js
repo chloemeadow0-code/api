@@ -53,6 +53,51 @@ export function extractUsage(text = '') {
   return found;
 }
 
+function nonEmptyText(value) {
+  if (typeof value === 'string') return Boolean(value.trim());
+  if (!Array.isArray(value)) return false;
+  return value.some(item => nonEmptyText(item?.text ?? item?.content ?? item));
+}
+
+function payloadHasModelOutput(value, endpoint) {
+  if (!value || typeof value !== 'object') return false;
+  if (endpoint === '/v1/embeddings') return Array.isArray(value.data) && value.data.some(item => Array.isArray(item?.embedding) && item.embedding.length);
+  if (Array.isArray(value.choices) && value.choices.some(choice =>
+    nonEmptyText(choice?.text) ||
+    nonEmptyText(choice?.message?.content) ||
+    nonEmptyText(choice?.message?.reasoning_content) ||
+    nonEmptyText(choice?.message?.refusal) ||
+    nonEmptyText(choice?.delta?.content) ||
+    nonEmptyText(choice?.delta?.reasoning_content) ||
+    (Array.isArray(choice?.message?.tool_calls) && choice.message.tool_calls.length > 0) ||
+    (Array.isArray(choice?.delta?.tool_calls) && choice.delta.tool_calls.length > 0)
+  )) return true;
+  if (nonEmptyText(value.output_text)) return true;
+  if (Array.isArray(value.output) && value.output.some(item =>
+    nonEmptyText(item?.content) || nonEmptyText(item?.text) ||
+    ['function_call', 'computer_call', 'web_search_call'].includes(item?.type)
+  )) return true;
+  if (/\.delta$|\.done$/.test(String(value.type || '')) && nonEmptyText(value.delta ?? value.text ?? value.content)) return true;
+  if (value.type === 'response.output_item.added' && ['function_call', 'computer_call', 'web_search_call'].includes(value.item?.type)) return true;
+  return value.response && value.response !== value ? payloadHasModelOutput(value.response, endpoint) : false;
+}
+
+export function hasMeaningfulModelResponse(text = '', endpoint = '/v1/chat/completions') {
+  const source = String(text || '').trim();
+  if (!source) return false;
+  try { if (payloadHasModelOutput(JSON.parse(source), endpoint)) return true; } catch {}
+  let sawSse = false;
+  for (const line of source.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    sawSse = true;
+    const raw = line.slice(5).trim();
+    if (!raw || raw === '[DONE]') continue;
+    try { if (payloadHasModelOutput(JSON.parse(raw), endpoint)) return true; } catch {}
+  }
+  if (sawSse || /<\s*!doctype|<html|<body/i.test(source)) return false;
+  return !/^[{[]/.test(source) && Boolean(source.trim());
+}
+
 export function appendBoundedTail(current = Buffer.alloc(0), chunk = Buffer.alloc(0), maximum = 262144) {
   const next = Buffer.concat([current, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
   return next.length > maximum ? next.subarray(next.length - maximum) : next;
@@ -101,6 +146,44 @@ async function readResponsePrefix(response, maximum = 16384) {
     try { await reader.cancel(); } catch {}
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function responseWithPrefetchedBody(response, reader, chunks, readerDone = false) {
+  let index = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      if (index < chunks.length) return controller.enqueue(chunks[index++]);
+      if (readerDone) return controller.close();
+      const { done, value } = await reader.read();
+      if (done) { readerDone = true; controller.close(); } else controller.enqueue(value);
+    },
+    cancel(reason) { return reader.cancel(reason); }
+  });
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
+async function validateSuccessfulResponse(response, endpoint, maximum = 262144) {
+  if (!response.body) return { valid: false, response: null, preview: '' };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (size < maximum) {
+    const { done, value } = await reader.read();
+    if (done) {
+      const preview = Buffer.concat(chunks).toString('utf8');
+      if (!hasMeaningfulModelResponse(preview, endpoint)) return { valid: false, response: null, preview };
+      return { valid: true, response: responseWithPrefetchedBody(response, reader, chunks, true), preview };
+    }
+    const chunk = Buffer.from(value);
+    const remaining = maximum - size;
+    chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk);
+    size += Math.min(chunk.length, remaining);
+    const preview = Buffer.concat(chunks).toString('utf8');
+    if (hasMeaningfulModelResponse(preview, endpoint)) return { valid: true, response: responseWithPrefetchedBody(response, reader, chunks), preview };
+    if (chunk.length > remaining || size >= maximum) break;
+  }
+  try { await reader.cancel(); } catch {}
+  return { valid: false, response: null, preview: Buffer.concat(chunks).toString('utf8') };
 }
 
 function candidates() {
@@ -186,7 +269,15 @@ export function installGateway(app) {
             recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, upstreamError });
             continue;
           }
-          return forward(response, res, text => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, ...extractUsage(text) }));
+          const checked = await validateSuccessfulResponse(response, endpoint);
+          if (!checked.valid) {
+            const reported = summarizeUpstreamError(response.status, checked.preview);
+            const upstreamError = `${reported}${reported === `HTTP ${response.status}` ? '' : ' ·'} 上游未返回模型内容`;
+            errors.push(`${account.name}: ${upstreamError}`);
+            recordGatewayRun(account, 'error', `${upstreamError}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, upstreamError, ...extractUsage(checked.preview) });
+            continue;
+          }
+          return forward(checked.response, res, text => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, ...extractUsage(text) }));
         } catch (error) {
           const upstreamError = redactUpstreamText(error.message).slice(0, 360);
           errors.push(`${account.name}: ${upstreamError}`);
