@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { extractUsage, installGateway, rewriteGatewayBody, selectGatewayCandidates } from '../src/gateway.js';
+import { appendBoundedTail, extractUsage, installGateway, rewriteGatewayBody, selectGatewayCandidates } from '../src/gateway.js';
 
 test('gateway ignores the client model and uses polling sites in saved order', () => {
   const db = {
@@ -22,6 +22,12 @@ test('gateway extracts input output and cached tokens from JSON and streams', ()
   const stream = 'data: {"choices":[],"usage":{"input_tokens":50,"output_tokens":10,"input_tokens_details":{"cached_tokens":30}}}\n\ndata: [DONE]\n';
   assert.deepEqual(extractUsage(stream), { inputTokens: 50, outputTokens: 10, cachedTokens: 30, totalTokens: 60 });
   assert.deepEqual(rewriteGatewayBody({ model: 'alias', stream: true }, { modelName: 'real' }, '/v1/chat/completions').stream_options, { include_usage: true });
+});
+
+test('gateway audit keeps only a bounded response tail', () => {
+  let tail = appendBoundedTail(Buffer.alloc(0), Buffer.from('1234'), 6);
+  tail = appendBoundedTail(tail, Buffer.from('56789'), 6);
+  assert.equal(tail.toString(), '456789');
 });
 
 test('gateway rejects requests when its client key is missing', async () => {

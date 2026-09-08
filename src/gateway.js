@@ -53,6 +53,11 @@ export function extractUsage(text = '') {
   return found;
 }
 
+export function appendBoundedTail(current = Buffer.alloc(0), chunk = Buffer.alloc(0), maximum = 262144) {
+  const next = Buffer.concat([current, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+  return next.length > maximum ? next.subarray(next.length - maximum) : next;
+}
+
 function candidates() {
   const db = readStore();
   return selectGatewayCandidates(db);
@@ -86,14 +91,25 @@ async function upstreamRequest(account, endpoint, body) {
   });
 }
 
-function forward(response, res) {
+function forward(response, res, onComplete = () => {}) {
   res.status(response.status);
   for (const name of ['content-type', 'cache-control', 'x-request-id']) {
     const value = response.headers.get(name);
     if (value) res.setHeader(name, value);
   }
-  if (!response.body) return res.end();
-  Readable.fromWeb(response.body).pipe(res);
+  if (!response.body) { onComplete(''); return res.end(); }
+  const body = Readable.fromWeb(response.body);
+  let auditTail = Buffer.alloc(0);
+  let completed = false;
+  const complete = () => {
+    if (completed) return;
+    completed = true;
+    onComplete(auditTail.toString('utf8'));
+  };
+  body.on('data', chunk => { auditTail = appendBoundedTail(auditTail, chunk); });
+  body.on('end', complete);
+  body.on('error', complete);
+  body.pipe(res);
 }
 
 export function installGateway(app) {
@@ -123,9 +139,7 @@ export function installGateway(app) {
             await response.arrayBuffer();
             continue;
           }
-          const auditResponse = response.clone();
-          auditResponse.text().then(text => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, ...extractUsage(text) })).catch(() => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint }));
-          return forward(response, res);
+          return forward(response, res, text => recordGatewayRun(account, 'ok', `HTTP ${response.status}`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, statusCode: response.status, endpoint, ...extractUsage(text) }));
         } catch (error) {
           errors.push(`${account.name}: ${error.message}`);
           recordGatewayRun(account, 'error', `${error.message}，已尝试下一站`, { requestId, attempt: index + 1, latencyMs: Date.now() - started, endpoint });

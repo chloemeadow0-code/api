@@ -93,6 +93,8 @@ test('server browser routes require the admin session', () => {
   assert.match(startup, /x11vnc .* -localhost/);
   assert.match(browser, /formReadyExpression/);
   assert.match(browser, /if \(closeWhenDone\) await closeTarget/);
+  assert.match(browser, /Page\.navigate.*about:blank/);
+  assert.match(browser, /BROWSER_LOGIN_WINDOW_MS/);
 });
 
 test('manual refresh shows progress while browser recovery runs', () => {

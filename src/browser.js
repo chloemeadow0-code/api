@@ -1,5 +1,7 @@
 const cdpBase = process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222';
 const maxBrowserPages = Math.max(1, Math.min(8, Number(process.env.BROWSER_MAX_TABS || 1) || 1));
+const manualBrowserWindowMs = Math.max(60000, Number(process.env.BROWSER_LOGIN_WINDOW_MS || 600000) || 600000);
+const manualPageTimers = new Map();
 
 export function createSerialBrowserQueue() {
   let tail = Promise.resolve();
@@ -65,12 +67,39 @@ async function cdpTarget(url, { activate = true } = {}) {
   return target;
 }
 
+async function blankTarget(target) {
+  if (!target?.webSocketDebuggerUrl) return;
+  const client = await connectCdp(target.webSocketDebuggerUrl);
+  try {
+    await client.call('Page.enable');
+    await client.call('Page.navigate', { url: 'about:blank' });
+  } finally { client.close(); }
+}
+
+function scheduleManualPageCleanup(targetId) {
+  clearTimeout(manualPageTimers.get(targetId));
+  const timer = setTimeout(() => {
+    manualPageTimers.delete(targetId);
+    runBrowserOperation(async () => {
+      const target = (await pageTargets().catch(() => [])).find(item => item.id === targetId);
+      if (target) await blankTarget(target).catch(() => {});
+    });
+  }, manualBrowserWindowMs);
+  timer.unref();
+  manualPageTimers.set(targetId, timer);
+}
+
 async function closeTarget(id) {
+  clearTimeout(manualPageTimers.get(id));
+  manualPageTimers.delete(id);
   // Closing Chromium's last page also closes its last window and can terminate
-  // the entire browser process. Keep that page alive; the next operation will
-  // reuse or replace it while still respecting the configured page cap.
+  // the entire browser process. Navigate the final page to about:blank instead,
+  // which also releases memory held by a heavy dashboard.
   const targets = await pageTargets().catch(() => []);
-  if (isLastBrowserPage(targets, id)) return;
+  if (isLastBrowserPage(targets, id)) {
+    await blankTarget(targets[0]).catch(() => {});
+    return;
+  }
   await fetch(`${cdpBase}/json/close/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
 }
 
@@ -466,9 +495,11 @@ async function openBrowserLoginUnlocked(baseUrl) {
   if (existing) {
     await fetch(`${cdpBase}/json/activate/${encodeURIComponent(existing.id)}`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
     await pruneBrowserTargets([existing.id]);
+    scheduleManualPageCleanup(existing.id);
     return { ok: true, url: existing.url || url, reused: true };
   }
-  await cdpTarget(url);
+  const target = await cdpTarget(url);
+  scheduleManualPageCleanup(target.id);
   return { ok: true, url };
 }
 
