@@ -225,7 +225,7 @@ test('distinguishes per-call and token model pricing', () => {
   assert.equal(summarizeModelPrice({ model_name: 'chat', quota_type: 0, model_ratio: 1.25, completion_ratio: 4 }, 500000).text, '输入 $2.5000 / 1M · 输出 $10.0000 / 1M');
 });
 
-test('applies the current account group ratio to model prices', () => {
+test('uses the current positive group ratio without treating a zero group as free pricing', () => {
   const models = { data: [{ id: 'gpt-free-call' }, { id: 'gpt-free-token' }] };
   const pricing = {
     data: [
@@ -234,11 +234,12 @@ test('applies the current account group ratio to model prices', () => {
     ],
     group_ratio: { default: 1, free: 0 }
   };
-  assert.equal(pricingGroupRatio(pricing, 'free'), 0);
+  assert.equal(pricingGroupRatio(pricing, 'free'), 1);
   const catalog = buildModelCatalog(models, pricing, 500000, 'free');
-  assert.equal(catalog.find(model => model.name === 'gpt-free-call').price, 0);
-  assert.match(catalog.find(model => model.name === 'gpt-free-call').text, /\$0\.0000 \/ 次 · 分组倍率 0/);
-  assert.match(catalog.find(model => model.name === 'gpt-free-token').text, /输入 \$0\.0000.*分组倍率 0/);
+  assert.equal(catalog.find(model => model.name === 'gpt-free-call').price, 0.02);
+  assert.equal(catalog.find(model => model.name === 'gpt-free-call').text, '$0.0200 / 次');
+  assert.match(catalog.find(model => model.name === 'gpt-free-token').text, /输入 \$4\.0000.*输出 \$16\.0000/);
+  assert.equal(pricingGroupRatio({ group_ratio: { free: 0, vip: 0.5 } }, 'free'), 0.5);
 });
 
 test('pricing reuses each panel login authentication', () => {

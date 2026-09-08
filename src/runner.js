@@ -366,13 +366,13 @@ export function pricingGroupRatio(pricingResponse, userGroup = '') {
   const group = String(userGroup || '').trim();
   if (group && Object.hasOwn(ratios, group)) {
     const ratio = Number(ratios[group]);
-    return Number.isFinite(ratio) && ratio >= 0 ? ratio : 1;
+    if (Number.isFinite(ratio) && ratio > 0) return ratio;
   }
-  const entries = Object.entries(ratios).filter(([, value]) => Number.isFinite(Number(value)) && Number(value) >= 0);
+  const entries = Object.entries(ratios).filter(([, value]) => Number.isFinite(Number(value)) && Number(value) > 0);
   if (entries.length === 1) return Number(entries[0][1]);
   if (Object.hasOwn(ratios, 'default')) {
     const ratio = Number(ratios.default);
-    if (Number.isFinite(ratio) && ratio >= 0) return ratio;
+    if (Number.isFinite(ratio) && ratio > 0) return ratio;
   }
   return 1;
 }
