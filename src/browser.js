@@ -47,6 +47,13 @@ export function isLastBrowserPage(targets = [], id = '') {
   return pages.length === 1 && pages[0].id === id;
 }
 
+export function reusableBlankBrowserTarget(targets = []) {
+  return targets.find(target => target?.type === 'page'
+    && target.id
+    && target.webSocketDebuggerUrl
+    && /^(?:about:blank|chrome:\/\/newtab\/?)/i.test(String(target.url || ''))) || null;
+}
+
 async function pruneBrowserTargets(keepIds = []) {
   const targets = await pageTargets().catch(() => []);
   const ids = browserTargetIdsToClose(targets, keepIds, maxBrowserPages);
@@ -54,6 +61,21 @@ async function pruneBrowserTargets(keepIds = []) {
 }
 
 async function cdpTarget(url, { activate = true } = {}) {
+  // With a one-tab browser, reuse the blank page left by the preceding
+  // automated operation. Creating the next heavy dashboard before pruning the
+  // previous renderer briefly doubles memory and can make small containers OOM.
+  if (maxBrowserPages === 1) {
+    const reusable = reusableBlankBrowserTarget(await pageTargets().catch(() => []));
+    if (reusable) {
+      const client = await connectCdp(reusable.webSocketDebuggerUrl);
+      try {
+        await client.call('Page.enable');
+        await client.call('Page.navigate', { url });
+      } finally { client.close(); }
+      if (activate) await fetch(`${cdpBase}/json/activate/${encodeURIComponent(reusable.id)}`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
+      return { ...reusable, url };
+    }
+  }
   let response;
   try {
     response = await retryBrowserConnection(() => fetch(`${cdpBase}/json/new?${encodeURIComponent(url)}`, { method: 'PUT', signal: AbortSignal.timeout(10000) }));
@@ -73,6 +95,12 @@ async function blankTarget(target) {
   try {
     await client.call('Page.enable');
     await client.call('Page.navigate', { url: 'about:blank' });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const state = await client.call('Runtime.evaluate', { expression: 'location.href === "about:blank"', returnByValue: true }).catch(() => null);
+      if (state?.result?.value === true) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    await client.call('HeapProfiler.collectGarbage').catch(() => {});
   } finally { client.close(); }
 }
 
@@ -512,7 +540,6 @@ async function checkinInBrowserUnlocked(baseUrl, endpoint, options = {}) {
   const endpointUrl = new URL(endpoint, baseUrl);
   const target = await cdpTarget(pageUrl);
   const client = await connectCdp(target.webSocketDebuggerUrl);
-  let closeWhenDone = false;
   let off = () => {};
   try {
     await client.call('Runtime.enable');
@@ -521,7 +548,6 @@ async function checkinInBrowserUnlocked(baseUrl, endpoint, options = {}) {
 
     const alreadyCheckedIn = await evaluateUntil(client, alreadyCheckedInExpression(), 10);
     if (alreadyCheckedIn) {
-      closeWhenDone = true;
       return { success: false, message: '今日已签到（Checked in）' };
     }
 
@@ -571,12 +597,14 @@ async function checkinInBrowserUnlocked(baseUrl, endpoint, options = {}) {
     if (captured.status < 200 || captured.status >= 300) {
       throw new Error(`${responseMessage(captured.data) || `HTTP ${captured.status}`} (HTTP ${captured.status})`);
     }
-    closeWhenDone = true;
     return captured.data;
   } finally {
     off();
     client.close();
-    if (closeWhenDone) await closeTarget(target.id);
+    // Automated check-in pages must never survive a failed click, Turnstile
+    // timeout, 401, or non-JSON response. A later site can otherwise overlap
+    // with this heavy page and push the whole container over its memory limit.
+    await closeTarget(target.id);
   }
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, retryBrowserConnection } from '../src/browser.js';
+import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, retryBrowserConnection, reusableBlankBrowserTarget } from '../src/browser.js';
 import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
 
 test('reads rotated bearer credentials from refresh responses', () => {
@@ -99,6 +99,17 @@ test('server browser never closes its final page', () => {
   assert.equal(isLastBrowserPage([{ id: 'only', type: 'page' }], 'only'), true);
   assert.equal(isLastBrowserPage([{ id: 'only', type: 'page' }, { id: 'worker', type: 'service_worker' }], 'only'), true);
   assert.equal(isLastBrowserPage([{ id: 'one', type: 'page' }, { id: 'two', type: 'page' }], 'one'), false);
+});
+
+test('server browser reuses only an empty page between automated sites', () => {
+  const blank = { id: 'blank', type: 'page', url: 'about:blank', webSocketDebuggerUrl: 'ws://blank' };
+  assert.equal(reusableBlankBrowserTarget([
+    { id: 'dashboard', type: 'page', url: 'https://example.com/dashboard', webSocketDebuggerUrl: 'ws://dashboard' },
+    blank
+  ]), blank);
+  assert.equal(reusableBlankBrowserTarget([
+    { id: 'dashboard', type: 'page', url: 'https://example.com/dashboard', webSocketDebuggerUrl: 'ws://dashboard' }
+  ]), null);
 });
 
 test('server browser operations run one at a time', async () => {

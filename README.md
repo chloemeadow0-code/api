@@ -40,6 +40,8 @@ Bearer 自动刷新会识别 HTTP 401、403，以及常见的 Unauthorized、inv
 
 回收临时页面时会始终保留 Chromium 的最后一个页面，并把它导航回 `about:blank` 释放重页面占用的内存，避免关闭最后窗口导致浏览器退出、黑屏并被守护任务反复重启。手动“浏览器登录”页面默认保留 10 分钟后自动回到空白页，可通过 `BROWSER_LOGIN_WINDOW_MS` 调整。
 
+自动浏览器签到无论成功、失败、401 或人机验证超时都会立即清空页面并回收脚本内存；下一站优先复用这一个空白标签页，避免切换站点时两个重页面短暂重叠导致小内存容器被驱逐。
+
 Chromium 进程意外退出时，容器内的守护任务会在 5 秒后自动重新启动；浏览器操作会短暂等待重启完成，避免瞬时返回 `ECONNREFUSED`。这只能恢复浏览器子进程；如果整个容器因内存不足被平台驱逐，仍需由部署平台重新启动容器。
 
 GitHub OAuth 两步登录可在 `BROWSER_LOGIN_ACCOUNTS_JSON` 的对应站点中设置 `{"action":"Sign in","nextAction":"Continue with GitHub"}`。单站环境变量对应为 `BROWSER_LOGIN_ACTION=Sign in` 和 `BROWSER_LOGIN_NEXT_ACTION=Continue with GitHub`。服务器浏览器中的 GitHub 账号仍需人工登录一次；之后站点退出时会自动依次点击这两个按钮并复用 GitHub 登录态。
