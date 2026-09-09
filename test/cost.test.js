@@ -46,3 +46,34 @@ test('prices per-call requests and never turns a missing token price into free u
   assert.equal(summary.nominalUsd, 0.02);
   assert.equal(Number(summary.actualCny.toFixed(6)), 0.072);
 });
+
+test('backfills historical usage with the logged model instead of the currently selected model', () => {
+  const account = {
+    id: 'a', modelName: 'new-model', rechargeConversion: { cnyPerUsd: 3.6 },
+    models: [
+      { name: 'old-model', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 },
+      { name: 'new-model', billing: 'token', inputPriceUsd: 20, outputPriceUsd: 100 }
+    ]
+  };
+  const summary = gatewayCostSummary([
+    { action: 'gateway', status: 'ok', accountId: 'a', modelName: 'old-model', inputTokens: 1000000, outputTokens: 0 }
+  ], [account]);
+  assert.equal(summary.nominalUsd, 2);
+  assert.equal(summary.pricedRequests, 1);
+  assert.equal(summary.historicalEstimates, 1);
+});
+
+test('reports why successful requests cannot be converted', () => {
+  const accounts = [
+    { id: 'no-topup', models: [] },
+    { id: 'no-price', rechargeConversion: { cnyPerUsd: 3.6 }, models: [] }
+  ];
+  const summary = gatewayCostSummary([
+    { action: 'gateway', status: 'ok', accountId: 'no-topup', modelName: 'gpt', inputTokens: 1, outputTokens: 1 },
+    { action: 'gateway', status: 'ok', accountId: 'no-price', modelName: 'gpt', inputTokens: 1, outputTokens: 1 }
+  ], accounts);
+  assert.equal(summary.totalSuccessful, 2);
+  assert.equal(summary.pricedRequests, 0);
+  assert.equal(summary.missingRecharge, 1);
+  assert.equal(summary.missingPriceOrUsage, 1);
+});

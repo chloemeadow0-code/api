@@ -52,8 +52,8 @@ function tokenPrices(model, account) {
   return { inputPriceUsd: input, outputPriceUsd: output };
 }
 
-export function modelPriceSnapshot(account) {
-  const model = account?.models?.find(item => item.name === account.modelName);
+export function modelPriceSnapshot(account, modelName = account?.modelName) {
+  const model = account?.models?.find(item => item.name === modelName);
   if (!model) return {};
   if (model.billing === 'call') {
     let callPriceUsd = Number(model.price);
@@ -65,7 +65,7 @@ export function modelPriceSnapshot(account) {
 }
 
 function eventNominalUsd(event, account) {
-  const snapshot = event.billing ? event : { ...modelPriceSnapshot(account), ...event };
+  const snapshot = event.billing ? event : { ...modelPriceSnapshot(account, event.modelName), ...event };
   if (snapshot.billing === 'call' && Number.isFinite(Number(snapshot.callPriceUsd))) return Number(snapshot.callPriceUsd);
   if (snapshot.billing !== 'token') return null;
   const inputTokens = Number(snapshot.inputTokens);
@@ -79,14 +79,32 @@ function eventNominalUsd(event, account) {
 export function gatewayCostSummary(events = [], accounts = []) {
   const accountMap = new Map(accounts.map(account => [account.id, account]));
   const coveredSites = new Set();
-  const totals = { nominalUsd: 0, referenceCny: 0, actualCny: 0, savedCny: 0, pricedRequests: 0, coveredSites: 0 };
+  const totals = {
+    nominalUsd: 0,
+    referenceCny: 0,
+    actualCny: 0,
+    savedCny: 0,
+    totalSuccessful: 0,
+    pricedRequests: 0,
+    historicalEstimates: 0,
+    missingRecharge: 0,
+    missingPriceOrUsage: 0,
+    coveredSites: 0
+  };
   for (const event of events) {
     if (event.action !== 'gateway' || event.status !== 'ok') continue;
+    totals.totalSuccessful += 1;
     const account = accountMap.get(event.accountId);
     const cnyPerUsd = Number(account?.rechargeConversion?.cnyPerUsd);
-    if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) continue;
+    if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) {
+      totals.missingRecharge += 1;
+      continue;
+    }
     const nominalUsd = eventNominalUsd(event, account);
-    if (!Number.isFinite(nominalUsd) || nominalUsd < 0) continue;
+    if (!Number.isFinite(nominalUsd) || nominalUsd < 0) {
+      totals.missingPriceOrUsage += 1;
+      continue;
+    }
     const exchangeRate = Number(account?.usdExchangeRate) > 0 ? Number(account.usdExchangeRate) : 7.2;
     const referenceCny = nominalUsd * exchangeRate;
     const actualCny = nominalUsd * cnyPerUsd;
@@ -95,6 +113,7 @@ export function gatewayCostSummary(events = [], accounts = []) {
     totals.actualCny += actualCny;
     totals.savedCny += referenceCny - actualCny;
     totals.pricedRequests += 1;
+    if (!event.billing) totals.historicalEstimates += 1;
     coveredSites.add(account.id);
   }
   totals.coveredSites = coveredSites.size;

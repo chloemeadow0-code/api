@@ -314,7 +314,15 @@ window.loadStats = async () => {
     const saved = Number(data.costs?.savedCny || 0);
     $('#savingLabel').textContent = saved < 0 ? '比市场价多花' : '累计节省';
     $('#savedCost').textContent = money(Math.abs(saved));
-    $('#pricedRequests').textContent = `${Number(data.costs?.pricedRequests || 0).toLocaleString()} 次调用已换算 · ${Number(data.costs?.coveredSites || 0)} 个站点`;
+    const costs = data.costs || {};
+    const costDetails = [
+      `${Number(costs.pricedRequests || 0).toLocaleString()} / ${Number(costs.totalSuccessful || 0).toLocaleString()} 次调用已换算`,
+      `${Number(costs.coveredSites || 0)} 个站点`
+    ];
+    if (Number(costs.historicalEstimates || 0) > 0) costDetails.push(`旧记录估算 ${Number(costs.historicalEstimates).toLocaleString()} 次`);
+    if (Number(costs.missingRecharge || 0) > 0) costDetails.push(`${Number(costs.missingRecharge).toLocaleString()} 次缺充值记录`);
+    if (Number(costs.missingPriceOrUsage || 0) > 0) costDetails.push(`${Number(costs.missingPriceOrUsage).toLocaleString()} 次缺价格或用量`);
+    $('#pricedRequests').textContent = costDetails.join(' · ');
     $('#trendTitle').textContent = `近 ${range} 天请求`;
     const max = Math.max(1, ...data.days.map(day => day.requests));
     $('#trendChart').innerHTML = data.days.map(day => `<div class="trend-day"><div class="trend-bar"><i style="height:${Math.max(day.requests ? 8 : 2, day.requests / max * 100)}%"></i></div><strong>${day.requests}</strong><span>${esc(day.date.slice(5))}</span></div>`).join('');
