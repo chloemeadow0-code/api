@@ -87,6 +87,7 @@ function render(data) {
       <a class="site-link" href="${esc(a.baseUrl)}" target="_blank" rel="noopener noreferrer">打开站点 ↗</a>
       ${a.refreshMode === 'browser' ? `<span class="browser-badge">服务器浏览器登录态${a.browserLoginAction ? ` · 自动点 ${esc(a.browserLoginAction)}` : ''}</span>` : ''}
       <div class="balance">${esc(a.balance ?? '—')}</div>
+      ${a.rechargeConversion ? `<div class="recharge-rate"><span>最近充值</span><strong>¥${Number(a.rechargeConversion.paidCny).toFixed(2)} → $${Number(a.rechargeConversion.faceAmountUsd).toFixed(2)} 额度</strong><small>每 $1 额度实付 ¥${Number(a.rechargeConversion.cnyPerUsd).toFixed(4)}</small></div>` : ''}
       <div class="model-box"><strong>${esc(a.modelName || '尚未选择模型')}</strong><span>${esc(priceWithEstimate(a.modelPrice) || (a.hasApiKey ? '点击选择模型并查看价格' : '请先编辑并填写 API Key'))}</span></div>
       <p class="meta">${a.lastError ? esc(a.lastError) : a.lastCheckinMessage ? esc(a.lastCheckinMessage) : a.lastCheckedAt ? '更新于 ' + new Date(a.lastCheckedAt).toLocaleString() : '等待首次刷新'}</p>
       <div class="card-actions"><button onclick="run('${a.id}','poll',this)">刷新</button><button class="secondary" onclick="run('${a.id}','checkin',this)">签到</button><button class="ghost" onclick="openTagPicker('${a.id}')">选择标签</button><button class="ghost" onclick="openModels('${a.id}')">选择模型</button><button class="ghost" onclick="testModel('${a.id}',this)">测试模型</button>${a.refreshMode === 'browser' ? `<button class="ghost" onclick="openServerBrowser('${a.id}')">浏览器登录</button>` : ''}<button class="ghost" onclick="edit('${a.id}')">编辑</button><button class="ghost" onclick="removeAccount('${a.id}')">删除</button></div>
@@ -306,6 +307,14 @@ window.loadStats = async () => {
     $('#outputTokens').textContent = data.tokens.all.output.toLocaleString(); $('#todayOutputTokens').textContent = `今日 ${data.tokens.today.output.toLocaleString()}`;
     $('#cachedTokens').textContent = data.tokens.all.cached.toLocaleString(); $('#todayCachedTokens').textContent = `今日 ${data.tokens.today.cached.toLocaleString()}`;
     $('#totalTokens').textContent = data.tokens.all.total.toLocaleString(); $('#measuredRequests').textContent = `${data.tokens.all.measured.toLocaleString()} 次返回用量`;
+    const money = value => `¥${Number(value || 0).toFixed(4)}`;
+    $('#nominalCost').textContent = `$${Number(data.costs?.nominalUsd || 0).toFixed(4)}`;
+    $('#referenceCost').textContent = money(data.costs?.referenceCny);
+    $('#actualCost').textContent = money(data.costs?.actualCny);
+    const saved = Number(data.costs?.savedCny || 0);
+    $('#savingLabel').textContent = saved < 0 ? '比市场价多花' : '累计节省';
+    $('#savedCost').textContent = money(Math.abs(saved));
+    $('#pricedRequests').textContent = `${Number(data.costs?.pricedRequests || 0).toLocaleString()} 次调用已换算 · ${Number(data.costs?.coveredSites || 0)} 个站点`;
     $('#trendTitle').textContent = `近 ${range} 天请求`;
     const max = Math.max(1, ...data.days.map(day => day.requests));
     $('#trendChart').innerHTML = data.days.map(day => `<div class="trend-day"><div class="trend-bar"><i style="height:${Math.max(day.requests ? 8 : 2, day.requests / max * 100)}%"></i></div><strong>${day.requests}</strong><span>${esc(day.date.slice(5))}</span></div>`).join('');

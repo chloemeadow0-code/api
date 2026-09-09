@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { decrypt, readStore, writeStore } from './store.js';
 import { modelApiUrl, shouldPoll } from './runner.js';
 import { chatCompletionResponse, responsesToChatBody, simplifiedChatBody } from './responses-compat.js';
+import { modelPriceSnapshot } from './cost.js';
 
 function authorized(req) {
   const expected = process.env.GATEWAY_API_KEY || '';
@@ -197,7 +198,7 @@ export function recordGatewayRun(account, status, message = '', details = {}) {
   db.runs.unshift({
     id: crypto.randomUUID(), accountId: account.id, action: 'gateway', status,
     message: `${account.modelName}${message ? ` · ${message}` : ''}`,
-    modelName: account.modelName, ...details,
+    modelName: account.modelName, ...modelPriceSnapshot(account), ...details,
     startedAt: new Date().toISOString()
   });
   db.runs = db.runs.slice(0, 5000);

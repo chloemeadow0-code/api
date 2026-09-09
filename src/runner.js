@@ -3,6 +3,7 @@ import net from 'node:net';
 import { decrypt, encrypt, mutateStore, readStore } from './store.js';
 import { accessTokenInBrowser, checkinInBrowser, refreshInBrowser, requestInBrowser } from './browser.js';
 import { readInviteCount, recordInviteCount } from './invite-alerts.js';
+import { rechargeConversionFromTopups } from './cost.js';
 
 const accountRunQueues = new Map();
 
@@ -668,7 +669,14 @@ async function runNewApi(account, action) {
   if (rawBalance === undefined) throw new Error(data?.message || '余额响应中没有 data.quota');
   const quotaPerUnit = Number(findConfig(config, ['quota_per_unit', 'quotaPerUnit', 'QuotaPerUnit'])) || 500000;
   const userGroup = String(valueAt(data, 'data.group') ?? '').trim();
-  return { balance: formatQuota(rawBalance, config, account.currency || 'auto'), rawBalance, quotaPerUnit, userGroup, inviteCount: readInviteCount(data), checkin };
+  const quotaDisplayType = String(findConfig(config, ['quota_display_type', 'quotaDisplayType', 'QuotaDisplayType']) || 'USD').toUpperCase();
+  const usdExchangeRate = Number(findConfig(config, ['usd_exchange_rate', 'usdExchangeRate', 'USDExchangeRate'])) || 7.2;
+  let rechargeConversion = null;
+  try {
+    const topups = await call(account, '/api/user/topup/self?p=0&page_size=20', 'GET', 'newapi', false, '', { allowBrowserRecovery: false });
+    rechargeConversion = rechargeConversionFromTopups(topups, quotaPerUnit, quotaDisplayType);
+  } catch {}
+  return { balance: formatQuota(rawBalance, config, account.currency || 'auto'), rawBalance, quotaPerUnit, userGroup, quotaDisplayType, usdExchangeRate, rechargeConversion, inviteCount: readInviteCount(data), checkin };
 }
 
 async function runGeneric(account, action) {
@@ -705,6 +713,9 @@ async function runAccountUnlocked(id, action = 'poll') {
     account.balance = result.balance;
     account.balanceRaw = result.rawBalance;
     account.quotaPerUnit = result.quotaPerUnit || account.quotaPerUnit || 500000;
+    if (result.quotaDisplayType) account.quotaDisplayType = result.quotaDisplayType;
+    if (Number(result.usdExchangeRate) > 0) account.usdExchangeRate = Number(result.usdExchangeRate);
+    if (result.rechargeConversion) account.rechargeConversion = result.rechargeConversion;
     if (result.userGroup) account.userGroup = result.userGroup;
     if (result.inviteCount !== null) {
       observedInviteCount = result.inviteCount;
@@ -735,7 +746,7 @@ async function runAccountUnlocked(id, action = 'poll') {
     const saved = latest.accounts.find(x => x.id === id);
     if (saved) {
       if (account.lastStatus === 'ok' && observedInviteCount !== null) recordInviteCount(latest, saved, observedInviteCount, new Date(account.lastCheckedAt));
-      for (const field of ['balance', 'balanceRaw', 'quotaPerUnit', 'userGroup', 'detectedType', 'lastStatus', 'lastError', 'lastCheckedAt', 'lastCheckinAt', 'lastCheckinStatus', 'lastCheckinMessage']) {
+      for (const field of ['balance', 'balanceRaw', 'quotaPerUnit', 'quotaDisplayType', 'usdExchangeRate', 'rechargeConversion', 'userGroup', 'detectedType', 'lastStatus', 'lastError', 'lastCheckedAt', 'lastCheckinAt', 'lastCheckinStatus', 'lastCheckinMessage']) {
         if (Object.hasOwn(account, field)) saved[field] = account[field];
       }
       if (saved.modelPrice?.type === 'per_call') {

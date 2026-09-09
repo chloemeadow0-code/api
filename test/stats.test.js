@@ -9,7 +9,11 @@ test('gateway statistics count logical requests, switches and rankings', () => {
     { id: 'b1', requestId: 'b', attempt: 1, action: 'gateway', accountId: 'one', modelName: 'gpt-a', status: 'ok', latencyMs: 300, inputTokens: 100, outputTokens: 20, cachedTokens: 60, totalTokens: 120, startedAt: '2026-09-05T02:00:00Z' },
     { id: 'poll', action: 'poll', accountId: 'one', status: 'ok', startedAt: '2026-09-05T02:00:00Z' }
   ];
-  const stats = gatewayStatistics(runs, [{ id: 'one', name: '一号' }, { id: 'two', name: '二号' }], new Date('2026-09-05T03:00:00Z'), 'UTC');
+  const accounts = [
+    { id: 'one', name: '一号', rechargeConversion: { cnyPerUsd: 3.6 }, usdExchangeRate: 7.2, modelName: 'gpt-a', models: [{ name: 'gpt-a', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }] },
+    { id: 'two', name: '二号' }
+  ];
+  const stats = gatewayStatistics(runs, accounts, new Date('2026-09-05T03:00:00Z'), 'UTC');
   assert.equal(stats.today.requests, 2);
   assert.equal(stats.today.successRate, 100);
   assert.equal(stats.all.switched, 1);
@@ -21,7 +25,11 @@ test('gateway statistics count logical requests, switches and rankings', () => {
   assert.deepEqual(stats.tokens.all, { input: 100, output: 20, cached: 60, total: 120, measured: 1 });
   assert.equal(stats.sites[0].name, '一号');
   assert.equal(stats.sites[0].successRate, 50);
-  const filtered = gatewayStatistics(runs, [{ id: 'one', name: '一号' }, { id: 'two', name: '二号' }], new Date('2026-09-05T03:00:00Z'), 'UTC', 7, { modelName: 'gpt-b' });
+  assert.equal(stats.costs.pricedRequests, 1);
+  assert.equal(stats.costs.nominalUsd, 0.0004);
+  assert.equal(stats.costs.actualCny, 0.00144);
+  assert.equal(stats.costs.savedCny, 0.00144);
+  const filtered = gatewayStatistics(runs, accounts, new Date('2026-09-05T03:00:00Z'), 'UTC', 7, { modelName: 'gpt-b' });
   assert.equal(filtered.all.requests, 1);
   assert.deepEqual(filtered.filters.models, ['gpt-a', 'gpt-b']);
 });

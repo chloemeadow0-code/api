@@ -192,6 +192,16 @@ test('left navigation includes filterable run logs', () => {
   assert.match(source, /\/api\/logs\?/);
 });
 
+test('gateway statistics show recharge-adjusted cost and savings', () => {
+  const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(html, /id="nominalCost"/);
+  assert.match(html, /id="actualCost"/);
+  assert.match(html, /id="savedCost"/);
+  assert.match(source, /rechargeConversion/);
+  assert.match(source, /pricedRequests/);
+});
+
 test('left navigation includes unread per-call price alerts', () => {
   const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
   const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
