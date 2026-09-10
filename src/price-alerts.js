@@ -171,18 +171,41 @@ function watchFields(scope = 'precise', billing = 'call') {
   };
 }
 
-export function updatePinnedPriceAlerts(alerts = [], leaders = [], now = new Date(), scope = 'precise', billing = 'call') {
+function exactPriceKey(accountId, modelName, billing = 'call') {
+  return `${accountId || ''}\u0000${billing}\u0000${canonicalModelName(modelName)}`;
+}
+
+export function updatePinnedPriceAlerts(alerts = [], leaders = [], now = new Date(), scope = 'precise', billing = 'call', tracking = {}) {
   const comparisonName = scope === 'broad' ? oneConnectorModelName : comparableModelName;
   const currentByFamily = new Map(leaders.map(item => [item.key || comparisonName(item.modelName), item]));
+  const exactTracking = Array.isArray(tracking.exactPrices);
+  const exactBySource = new Map((tracking.exactPrices || [])
+    .filter(item => (item.billing || 'call') === billing)
+    .map(item => [exactPriceKey(item.accountId, item.modelName, billing), item]));
+  const refreshedAccountIds = new Set(tracking.refreshedAccountIds || []);
   const changedAt = now.toISOString();
   for (const alert of alerts) {
     if (!alert.pinned || (alert.scope || 'precise') !== scope || (alert.billing || 'call') !== billing) continue;
     const family = alert.comparisonName || (scope === 'broad' ? oneConnectorModelName(alert.modelName) : comparableModelName(alert.modelName));
-    const current = currentByFamily.get(family);
-    const previousPrice = Number(alert.currentPriceUsd ?? alert.newPriceUsd);
-    const previousOutputPrice = Number(alert.currentOutputPriceUsd ?? alert.newOutputPriceUsd);
-    const previousModel = alert.currentModelName || alert.modelName;
-    const previousAccountId = alert.currentAccountId || alert.accountId;
+    const migratingToExactSource = exactTracking && !alert.watchedAccountId;
+    const watchedAccountId = alert.watchedAccountId || alert.accountId;
+    const watchedAccountName = alert.watchedAccountName || alert.accountName;
+    const watchedModelName = alert.watchedModelName || alert.modelName;
+    alert.watchedAccountId = watchedAccountId;
+    alert.watchedAccountName = watchedAccountName;
+    alert.watchedModelName = watchedModelName;
+    if (exactTracking && !refreshedAccountIds.has(watchedAccountId)) {
+      alert.lastWatchAttemptAt = changedAt;
+      alert.watchCheckMessage = '本次原站点刷新失败，保留上次结果';
+      continue;
+    }
+    const current = exactTracking
+      ? exactBySource.get(exactPriceKey(watchedAccountId, watchedModelName, billing))
+      : currentByFamily.get(family);
+    const previousPrice = Number(migratingToExactSource ? alert.newPriceUsd : alert.currentPriceUsd ?? alert.newPriceUsd);
+    const previousOutputPrice = Number(migratingToExactSource ? alert.newOutputPriceUsd ?? alert.newPriceUsd : alert.currentOutputPriceUsd ?? alert.newOutputPriceUsd ?? alert.newPriceUsd);
+    const previousModel = exactTracking ? watchedModelName : alert.currentModelName || alert.modelName;
+    const previousAccountId = exactTracking ? watchedAccountId : alert.currentAccountId || alert.accountId;
     let change = null;
 
     if (!current) {
@@ -199,8 +222,8 @@ export function updatePinnedPriceAlerts(alerts = [], leaders = [], now = new Dat
       };
       const compared = Number.isFinite(previousPrice) ? comparePrices(current, previous) : 0;
       if (alert.watchStatus === 'missing') change = { status: 'restored', message: '模型重新出现了' };
-      else if (compared > 0) change = { status: 'up', message: '价格变贵了' };
-      else if (compared < 0) change = { status: 'down', message: '价格又降低了' };
+      else if (compared > 0) change = { status: 'up', message: exactTracking ? '原站点模型价格变贵了' : '价格变贵了' };
+      else if (compared < 0) change = { status: 'down', message: exactTracking ? '原站点模型价格又降低了' : '价格又降低了' };
       else if (previousModel !== current.modelName || previousAccountId !== current.accountId) change = { status: 'switched', message: '最低站点或模型变体已变化' };
       alert.currentPriceUsd = current.priceUsd;
       alert.currentOutputPriceUsd = current.outputPriceUsd ?? null;
@@ -210,6 +233,7 @@ export function updatePinnedPriceAlerts(alerts = [], leaders = [], now = new Dat
     }
 
     alert.lastWatchedAt = changedAt;
+    delete alert.watchCheckMessage;
     if (change) {
       alert.watchStatus = change.status;
       alert.watchMessage = change.message;
@@ -223,7 +247,7 @@ export function updatePinnedPriceAlerts(alerts = [], leaders = [], now = new Dat
   return alerts;
 }
 
-export function updatePriceWatchState(db, leaders, now = new Date(), scope = 'precise', billing = 'call') {
+export function updatePriceWatchState(db, leaders, now = new Date(), scope = 'precise', billing = 'call', tracking = {}) {
   const previous = db.priceWatch || {};
   const { initializedField, leadersField } = watchFields(scope, billing);
   const initialized = previous[initializedField] === true;
@@ -231,7 +255,7 @@ export function updatePriceWatchState(db, leaders, now = new Date(), scope = 'pr
   const nextLeaders = Object.fromEntries(leaders.map(item => [item.key, item]));
   const alerts = Array.isArray(previous.alerts) ? previous.alerts : [];
   const comparisonName = scope === 'broad' ? oneConnectorModelName : comparableModelName;
-  updatePinnedPriceAlerts(alerts, leaders, now, scope, billing);
+  updatePinnedPriceAlerts(alerts, leaders, now, scope, billing, tracking);
   const pinnedFamilies = new Set(alerts
     .filter(alert => alert.pinned && (alert.scope || 'precise') === scope && (alert.billing || 'call') === billing)
     .map(alert => alert.comparisonName || comparisonName(alert.modelName)));
@@ -300,9 +324,10 @@ async function performPriceScan() {
   const snapshot = readStore();
   const candidates = priceScanCandidates(snapshot.accounts);
   const errors = [];
+  const refreshedAccountIds = [];
   let refreshed = 0;
   for (const account of candidates) {
-    try { await refreshModelCatalog(account.id, { allowBrowserRecovery: false, requirePricing: true }); refreshed++;
+    try { await refreshModelCatalog(account.id, { allowBrowserRecovery: false, requirePricing: true }); refreshed++; refreshedAccountIds.push(account.id);
     } catch (error) { errors.push({ accountId: account.id, accountName: account.name, message: error.message }); }
   }
   const db = readStore();
@@ -311,11 +336,12 @@ async function performPriceScan() {
   const broadLeaders = buildOneConnectorPriceLeaders(db.accounts);
   const tokenLeaders = buildTokenPriceLeaders(db.accounts);
   const tokenBroadLeaders = buildOneConnectorTokenPriceLeaders(db.accounts);
+  const tracking = { exactPrices: buildModelPriceCatalog(db.accounts), refreshedAccountIds };
   const created = [
-    ...updatePriceWatchState(db, leaders, now, 'precise'),
-    ...updatePriceWatchState(db, broadLeaders, now, 'broad'),
-    ...updatePriceWatchState(db, tokenLeaders, now, 'precise', 'token'),
-    ...updatePriceWatchState(db, tokenBroadLeaders, now, 'broad', 'token')
+    ...updatePriceWatchState(db, leaders, now, 'precise', 'call', tracking),
+    ...updatePriceWatchState(db, broadLeaders, now, 'broad', 'call', tracking),
+    ...updatePriceWatchState(db, tokenLeaders, now, 'precise', 'token', tracking),
+    ...updatePriceWatchState(db, tokenBroadLeaders, now, 'broad', 'token', tracking)
   ];
   db.priceWatch.lastScan = { monitored: candidates.length, refreshed, failed: errors.length, errors: errors.slice(0, 30) };
   writeStore(db);
@@ -349,16 +375,18 @@ export function setPriceAlertPinned(id, pinned = true) {
   alert.pinned = Boolean(pinned);
   if (alert.pinned) {
     const now = new Date().toISOString();
-    const broad = alert.scope === 'broad';
     const billing = alert.billing || 'call';
-    const family = alert.comparisonName || (broad ? oneConnectorModelName(alert.modelName) : comparableModelName(alert.modelName));
-    const { leadersField } = watchFields(alert.scope || 'precise', billing);
-    const current = db.priceWatch?.[leadersField]?.[family];
+    const current = buildModelPriceCatalog(db.accounts || []).find(item =>
+      item.accountId === alert.accountId && canonicalModelName(item.modelName) === canonicalModelName(alert.modelName) && item.billing === billing
+    );
     alert.pinnedAt = now;
     alert.unread = false;
     alert.lastWatchedAt = now;
     alert.watchStatus = current ? 'watching' : 'missing';
     alert.watchMessage = current ? '持续观察中' : '当前已找不到这个模型';
+    alert.watchedAccountId = alert.accountId;
+    alert.watchedAccountName = alert.accountName;
+    alert.watchedModelName = alert.modelName;
     alert.currentPriceUsd = current?.priceUsd ?? null;
     alert.currentOutputPriceUsd = current?.outputPriceUsd ?? null;
     alert.currentModelName = current?.modelName || '';

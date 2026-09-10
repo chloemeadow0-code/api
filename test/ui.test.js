@@ -220,6 +220,7 @@ test('left navigation includes unread per-call price alerts', () => {
   assert.match(html, /全站模型最低价查询/);
   assert.match(html, /id="priceModelSearch"/);
   assert.match(html, /id="priceModelSearchResults"/);
+  assert.match(source, /priceAlertData = latest/);
   assert.doesNotMatch(html, /id="priceModelFilter"/);
   assert.match(html, />一个连接符</);
   assert.match(html, />两个连接符</);

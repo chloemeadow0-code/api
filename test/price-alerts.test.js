@@ -146,15 +146,25 @@ test('prices that render identically do not create or display a false drop alert
 
 test('pinned alert tracks price increases and model disappearance', () => {
   const alert = { id: 'notice', pinned: true, unread: false, comparisonName: 'gpt-5.5', modelName: 'gpt-5.5-fast', newPriceUsd: 0.02, currentPriceUsd: 0.02, currentModelName: 'gpt-5.5-fast', currentAccountId: 'a', accountId: 'a' };
-  updatePinnedPriceAlerts([alert], [{ key: 'gpt-5.5', modelName: 'gpt-5.5-fast', priceUsd: 0.03, accountId: 'a', accountName: 'A' }], new Date('2026-09-06T00:00:00Z'));
+  const tracking = { exactPrices: [{ billing: 'call', modelName: 'gpt-5.5-fast', priceUsd: 0.03, accountId: 'a', accountName: 'A' }], refreshedAccountIds: ['a'] };
+  updatePinnedPriceAlerts([alert], [{ key: 'gpt-5.5', modelName: 'gpt-5.5-fast', priceUsd: 0.02, accountId: 'b', accountName: 'B' }], new Date('2026-09-06T00:00:00Z'), 'precise', 'call', tracking);
   assert.equal(alert.watchStatus, 'up');
   assert.equal(alert.unread, true);
   assert.equal(alert.currentPriceUsd, 0.03);
+  assert.equal(alert.currentAccountId, 'a');
   alert.unread = false;
-  updatePinnedPriceAlerts([alert], [], new Date('2026-09-06T01:00:00Z'));
+  updatePinnedPriceAlerts([alert], [{ key: 'gpt-5.5', modelName: 'gpt-5.5-fast', priceUsd: 0.02, accountId: 'b', accountName: 'B' }], new Date('2026-09-06T01:00:00Z'), 'precise', 'call', { exactPrices: [], refreshedAccountIds: ['a'] });
   assert.equal(alert.watchStatus, 'missing');
   assert.equal(alert.currentPriceUsd, null);
   assert.equal(alert.unread, true);
+});
+
+test('a failed source refresh never turns a pinned model into a false disappearance', () => {
+  const alert = { id: 'notice', pinned: true, unread: false, watchStatus: 'watching', comparisonName: 'gpt-5.5', modelName: 'gpt-5.5', newPriceUsd: 0.02, currentPriceUsd: 0.02, accountId: 'a', accountName: 'A', watchedAccountId: 'a' };
+  updatePinnedPriceAlerts([alert], [], new Date('2026-09-06T01:00:00Z'), 'precise', 'call', { exactPrices: [], refreshedAccountIds: ['b'] });
+  assert.equal(alert.watchStatus, 'watching');
+  assert.equal(alert.unread, false);
+  assert.match(alert.watchCheckMessage, /刷新失败/);
 });
 
 test('a pinned family updates in place instead of creating duplicate drop messages', () => {

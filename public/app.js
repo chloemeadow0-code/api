@@ -38,8 +38,15 @@ function setInviteAlertBadge(count = 0) {
 }
 
 async function refreshPriceAlertBadge() {
-  if ($('#app').classList.contains('hidden') || !$('#priceAlertsView').classList.contains('hidden')) return;
-  try { setPriceAlertBadge((await api('/api/price-alerts')).unreadCount || 0); } catch {}
+  if ($('#app').classList.contains('hidden')) return;
+  try {
+    const latest = await api('/api/price-alerts');
+    setPriceAlertBadge(latest.unreadCount || 0);
+    if (!$('#priceAlertsView').classList.contains('hidden')) {
+      priceAlertData = latest;
+      renderPriceAlerts();
+    }
+  } catch {}
 }
 async function refreshInviteAlertBadge() {
   if ($('#app').classList.contains('hidden') || !$('#inviteAlertsView').classList.contains('hidden')) return;
@@ -235,8 +242,8 @@ window.renderPriceAlerts = () => {
   renderPriceModelSearch();
   $('#priceAlertHistory').innerHTML = alerts.map(item => {
     const watchText = item.pinned
-      ? item.watchStatus === 'missing' ? '当前已消失'
-        : `${esc(item.watchMessage || '持续观察中')} · 当前 ${esc(watchedPrice(item, 'current'))}${item.currentModelName ? ` · ${esc(item.currentModelName)}` : ''}${item.currentAccountName ? ` · ${esc(item.currentAccountName)}` : ''}`
+      ? item.watchStatus === 'missing' ? `原站点模型已消失 · ${esc(item.watchedAccountName || item.accountName)} · ${esc(item.watchedModelName || item.modelName)}`
+        : `${esc(item.watchMessage || '持续观察中')} · 当前 ${esc(watchedPrice(item, 'current'))}${item.currentModelName ? ` · ${esc(item.currentModelName)}` : ''}${item.currentAccountName ? ` · ${esc(item.currentAccountName)}` : ''}${item.watchCheckMessage ? ` · ${esc(item.watchCheckMessage)}` : ''}`
       : '';
     const scopeLabel = item.scope === 'broad' ? '一个连接符' : '两个连接符';
     const billingLabel = (item.billing || 'call') === 'token' ? '按量' : '按次';
