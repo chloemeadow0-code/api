@@ -320,7 +320,8 @@ window.loadStats = async () => {
       `${Number(costs.coveredSites || 0)} 个站点`
     ];
     if (Number(costs.historicalEstimates || 0) > 0) costDetails.push(`旧记录估算 ${Number(costs.historicalEstimates).toLocaleString()} 次`);
-    if (Number(costs.missingRecharge || 0) > 0) costDetails.push(`${Number(costs.missingRecharge).toLocaleString()} 次缺充值记录`);
+    if (Number(costs.freeCreditEstimates || 0) > 0) costDetails.push(`${Number(costs.freeCreditEstimates).toLocaleString()} 次无充值，按免费额度`);
+    if (Number(costs.tokenSplitEstimates || 0) > 0) costDetails.push(`${Number(costs.tokenSplitEstimates).toLocaleString()} 次仅总 Token 估算`);
     if (Number(costs.missingPriceOrUsage || 0) > 0) costDetails.push(`${Number(costs.missingPriceOrUsage).toLocaleString()} 次缺价格或用量`);
     $('#pricedRequests').textContent = costDetails.join(' · ');
     $('#trendTitle').textContent = `近 ${range} 天请求`;

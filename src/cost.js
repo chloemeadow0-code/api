@@ -66,14 +66,26 @@ export function modelPriceSnapshot(account, modelName = account?.modelName) {
 
 function eventNominalUsd(event, account) {
   const snapshot = event.billing ? event : { ...modelPriceSnapshot(account, event.modelName), ...event };
-  if (snapshot.billing === 'call' && Number.isFinite(Number(snapshot.callPriceUsd))) return Number(snapshot.callPriceUsd);
+  if (snapshot.billing === 'call' && Number.isFinite(Number(snapshot.callPriceUsd))) {
+    return { nominalUsd: Number(snapshot.callPriceUsd), tokenSplitEstimated: false };
+  }
   if (snapshot.billing !== 'token') return null;
   const inputTokens = Number(snapshot.inputTokens);
   const outputTokens = Number(snapshot.outputTokens);
+  const totalTokens = Number(snapshot.totalTokens);
   const inputPrice = Number(snapshot.inputPriceUsd);
   const outputPrice = Number(snapshot.outputPriceUsd);
-  if (![inputTokens, outputTokens, inputPrice, outputPrice].every(Number.isFinite)) return null;
-  return inputTokens * inputPrice / 1000000 + outputTokens * outputPrice / 1000000;
+  if (![inputPrice, outputPrice].every(Number.isFinite)) return null;
+  if ([inputTokens, outputTokens].every(Number.isFinite) && inputTokens + outputTokens > 0) {
+    return {
+      nominalUsd: inputTokens * inputPrice / 1000000 + outputTokens * outputPrice / 1000000,
+      tokenSplitEstimated: false
+    };
+  }
+  if (Number.isFinite(totalTokens) && totalTokens > 0) {
+    return { nominalUsd: totalTokens * inputPrice / 1000000, tokenSplitEstimated: true };
+  }
+  return null;
 }
 
 export function gatewayCostSummary(events = [], accounts = []) {
@@ -87,7 +99,8 @@ export function gatewayCostSummary(events = [], accounts = []) {
     totalSuccessful: 0,
     pricedRequests: 0,
     historicalEstimates: 0,
-    missingRecharge: 0,
+    freeCreditEstimates: 0,
+    tokenSplitEstimates: 0,
     missingPriceOrUsage: 0,
     coveredSites: 0
   };
@@ -95,25 +108,25 @@ export function gatewayCostSummary(events = [], accounts = []) {
     if (event.action !== 'gateway' || event.status !== 'ok') continue;
     totals.totalSuccessful += 1;
     const account = accountMap.get(event.accountId);
-    const cnyPerUsd = Number(account?.rechargeConversion?.cnyPerUsd);
-    if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) {
-      totals.missingRecharge += 1;
-      continue;
-    }
-    const nominalUsd = eventNominalUsd(event, account);
-    if (!Number.isFinite(nominalUsd) || nominalUsd < 0) {
+    const calculated = eventNominalUsd(event, account);
+    if (!calculated || !Number.isFinite(calculated.nominalUsd) || calculated.nominalUsd < 0) {
       totals.missingPriceOrUsage += 1;
       continue;
     }
+    const nominalUsd = calculated.nominalUsd;
     const exchangeRate = Number(account?.usdExchangeRate) > 0 ? Number(account.usdExchangeRate) : 7.2;
+    const rechargeRate = Number(account?.rechargeConversion?.cnyPerUsd);
+    const hasRecharge = Number.isFinite(rechargeRate) && rechargeRate > 0;
     const referenceCny = nominalUsd * exchangeRate;
-    const actualCny = nominalUsd * cnyPerUsd;
+    const actualCny = hasRecharge ? nominalUsd * rechargeRate : 0;
     totals.nominalUsd += nominalUsd;
     totals.referenceCny += referenceCny;
     totals.actualCny += actualCny;
     totals.savedCny += referenceCny - actualCny;
     totals.pricedRequests += 1;
     if (!event.billing) totals.historicalEstimates += 1;
+    if (!hasRecharge) totals.freeCreditEstimates += 1;
+    if (calculated.tokenSplitEstimated) totals.tokenSplitEstimates += 1;
     coveredSites.add(account.id);
   }
   totals.coveredSites = coveredSites.size;

@@ -63,17 +63,38 @@ test('backfills historical usage with the logged model instead of the currently 
   assert.equal(summary.historicalEstimates, 1);
 });
 
-test('reports why successful requests cannot be converted', () => {
-  const accounts = [
-    { id: 'no-topup', models: [] },
-    { id: 'no-price', rechargeConversion: { cnyPerUsd: 3.6 }, models: [] }
-  ];
+test('treats usage without a recharge record as free credit savings', () => {
+  const accounts = [{
+    id: 'free', usdExchangeRate: 7.2,
+    models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
+  }];
   const summary = gatewayCostSummary([
-    { action: 'gateway', status: 'ok', accountId: 'no-topup', modelName: 'gpt', inputTokens: 1, outputTokens: 1 },
-    { action: 'gateway', status: 'ok', accountId: 'no-price', modelName: 'gpt', inputTokens: 1, outputTokens: 1 }
+    { action: 'gateway', status: 'ok', accountId: 'free', modelName: 'gpt', inputTokens: 1000000, outputTokens: 0 }
   ], accounts);
-  assert.equal(summary.totalSuccessful, 2);
+  assert.equal(summary.nominalUsd, 2);
+  assert.equal(summary.referenceCny, 14.4);
+  assert.equal(summary.actualCny, 0);
+  assert.equal(summary.savedCny, 14.4);
+  assert.equal(summary.freeCreditEstimates, 1);
+});
+
+test('estimates old usage from total tokens when the input/output split is missing', () => {
+  const accounts = [{
+    id: 'total-only', usdExchangeRate: 7.2,
+    models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
+  }];
+  const summary = gatewayCostSummary([
+    { action: 'gateway', status: 'ok', accountId: 'total-only', modelName: 'gpt', inputTokens: 0, outputTokens: 0, totalTokens: 500000 }
+  ], accounts);
+  assert.equal(summary.nominalUsd, 1);
+  assert.equal(summary.tokenSplitEstimates, 1);
+});
+
+test('reports successful requests that still lack model price or token usage', () => {
+  const summary = gatewayCostSummary([
+    { action: 'gateway', status: 'ok', accountId: 'no-price', modelName: 'gpt', inputTokens: 1, outputTokens: 1 }
+  ], [{ id: 'no-price', models: [] }]);
+  assert.equal(summary.totalSuccessful, 1);
   assert.equal(summary.pricedRequests, 0);
-  assert.equal(summary.missingRecharge, 1);
   assert.equal(summary.missingPriceOrUsage, 1);
 });
