@@ -59,7 +59,7 @@ test('custom bearer accounts can save automatic refresh settings', () => {
   assert.match(html, /name="refreshMode"/);
   assert.match(html, /name="newApiCredentialType"/);
   assert.match(html, /长期 PAT/);
-  assert.match(html, /云端令牌自动续期|云端令牌/);
+  assert.match(html, /自动回收令牌/);
   assert.match(html, /name="browserLoginAction"/);
   assert.match(html, /失效后自动点击的登录按钮/);
   assert.match(html, /BROWSER_LOGIN_ACCOUNT/);
@@ -79,6 +79,7 @@ test('custom bearer accounts can save automatic refresh settings', () => {
   assert.match(source, /\/browser-open/);
   assert.match(source, /browserCaptureStatus/);
   assert.match(html, /自动解析并保存令牌/);
+  assert.match(html, /value="browser" selected>一键浏览器登录/);
 });
 
 test('server browser routes require the admin session', () => {

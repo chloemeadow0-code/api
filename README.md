@@ -24,7 +24,7 @@ npm start
 
 ## 接入站点
 
-默认提供 New API / One API 多站点模板。推荐在“登录凭据类型”选择“长期 PAT / Bearer”，这样云端可直接调用且不依赖浏览器；旧站仍可填写登录 Cookie 和数字用户 ID，程序会发送 `Cookie` 与 `New-Api-User` 请求头。两种方式都会读取 `/api/user/self` 的额度，并调用 `/api/user/checkin` 签到，可以重复添加任意数量的站点。
+默认提供 New API / One API 多站点模板。新增站点不要求手填 PAT、Cookie 或用户 ID：保存后点击“浏览器登录”，完成原站登录，应用会自动回收登录响应中的身份、令牌和 Cookie，随后自动刷新余额。手动 PAT、Cookie、用户 ID 和刷新接口仍保留在折叠的兼容设置中。程序读取 `/api/user/self` 的额度并调用 `/api/user/checkin` 签到，可以重复添加任意数量的站点。
 
 特殊站点可选择“自定义 JSON API”：填写余额接口与 JSON 字段路径、签到接口，以及 Bearer Token、Cookie 或自定义请求头凭据。例如余额响应为 `{ "data": { "points": 120 } }`，余额字段填 `data.points`。短期 Bearer 还可填写刷新接口和 `new_api_refresh` Cookie；请求遇到 401 时会自动刷新、保存轮换凭据并重试一次。
 若站点余额使用 Bearer、模型价格接口却使用浏览器登录 Cookie，可单独填写“价格 Cookie”；它只用于价格接口，不会覆盖余额与签到凭据。

@@ -717,7 +717,8 @@ export function classifyCheckin(data) {
 }
 
 async function runNewApi(account, action) {
-  if (account.newApiCredentialType !== 'bearer' && !account.userId) throw new Error('Cookie 登录请填写用户 ID');
+  const canRecoverIdentity = account.refreshMode === 'browser' || account.browserAccessToken || account.refreshCookie;
+  if (account.newApiCredentialType !== 'bearer' && !account.userId && !canRecoverIdentity) throw new Error('Cookie 登录请填写用户 ID，或改用一键浏览器登录自动识别');
   if (!account.credential && !account.refreshCookie && account.refreshMode !== 'browser') throw new Error('请填写长期 PAT、登录 Cookie 或 Refresh Cookie');
   let checkin;
   if (action === 'checkin') checkin = await runCheckin(account, '/api/user/checkin', 'newapi');

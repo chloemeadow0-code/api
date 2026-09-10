@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, refreshCookieFromBrowserCookies, retryBrowserConnection, reusableBlankBrowserTarget, sessionCookieFromBrowserCookies } from '../src/browser.js';
+import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, refreshCookieFromBrowserCookies, retryBrowserConnection, reusableBlankBrowserTarget, sessionCookieFromBrowserCookies, userIdFromAuthResponseText } from '../src/browser.js';
 import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, newApiCredentialHeaders, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, refreshPathFor, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
 
 test('reads rotated bearer credentials from refresh responses', () => {
@@ -32,6 +32,12 @@ test('captures legacy session cookies without treating refresh hints as login', 
     { name: 'cf_clearance', value: 'challenge' },
     { name: 'session', value: 'signed-login', httpOnly: true }
   ]), 'session=signed-login');
+});
+
+test('discovers the New API user id from login responses and JWT claims', () => {
+  assert.equal(userIdFromAuthResponseText(JSON.stringify({ data: { user: { id: 68887 } } })), '68887');
+  const jwt = `header.${Buffer.from(JSON.stringify({ sub: '42' })).toString('base64url')}.signature`;
+  assert.equal(userIdFromAuthResponseText('', jwt), '42');
 });
 
 test('refreshes bearer auth for nonstandard expired-login responses', () => {

@@ -131,7 +131,7 @@ app.post('/api/accounts', auth, (req, res) => {
   }
   const tags = b.tags === undefined ? old?.tags || [] : Array.isArray(b.tags) ? b.tags : String(b.tags || '').split(/[,，]/);
   const account = {
-    ...old, id: old?.id || crypto.randomUUID(), name: b.name.trim(), baseUrl: b.baseUrl.trim().replace(/\/$/, ''), inviteUrl: b.inviteUrl?.trim() || '', modelBaseUrl: b.modelBaseUrl?.trim().replace(/\/$/, '') || '', panelType: b.panelType || 'auto', currency: b.currency || 'auto', userId: b.userId?.trim() || '', newApiCredentialType: b.newApiCredentialType ? (b.newApiCredentialType === 'bearer' ? 'bearer' : 'cookie') : old?.newApiCredentialType || 'cookie', modelName: b.modelName !== undefined ? b.modelName.trim() : old?.modelName || '', tags: [...new Set(tags.map(x => String(x).trim()).filter(Boolean))].slice(0, 10), balancePath: b.balancePath?.trim() || '', balanceMethod: b.balanceMethod === 'POST' ? 'POST' : 'GET', balanceBody, balanceField: b.balanceField || 'balance', balanceDivisor: b.balanceDivisor || '1', checkinPath: b.checkinPath?.trim() || '', checkinMethod: b.checkinMethod || 'POST', authType: b.authType || 'bearer', headerName: b.headerName || '', refreshPath: b.refreshPath?.trim() || '', refreshMode: b.refreshMode === 'browser' ? 'browser' : 'http', browserLoginAction: String(b.browserLoginAction || '').trim().slice(0, 60), enabled: b.enabled !== false,
+    ...old, id: old?.id || crypto.randomUUID(), name: b.name.trim(), baseUrl: b.baseUrl.trim().replace(/\/$/, ''), inviteUrl: b.inviteUrl?.trim() || '', modelBaseUrl: b.modelBaseUrl?.trim().replace(/\/$/, '') || '', panelType: b.panelType || 'auto', currency: b.currency || 'auto', userId: b.userId?.trim() || '', newApiCredentialType: b.newApiCredentialType ? (b.newApiCredentialType === 'bearer' ? 'bearer' : 'cookie') : old?.newApiCredentialType || 'cookie', modelName: b.modelName !== undefined ? b.modelName.trim() : old?.modelName || '', tags: [...new Set(tags.map(x => String(x).trim()).filter(Boolean))].slice(0, 10), balancePath: b.balancePath?.trim() || '', balanceMethod: b.balanceMethod === 'POST' ? 'POST' : 'GET', balanceBody, balanceField: b.balanceField || 'balance', balanceDivisor: b.balanceDivisor || '1', checkinPath: b.checkinPath?.trim() || '', checkinMethod: b.checkinMethod || 'POST', authType: b.authType || 'bearer', headerName: b.headerName || '', refreshPath: b.refreshPath?.trim() || '', refreshMode: b.refreshMode ? (b.refreshMode === 'browser' ? 'browser' : 'http') : old?.refreshMode || 'browser', browserLoginAction: String(b.browserLoginAction || '').trim().slice(0, 60), enabled: b.enabled !== false,
     credential: b.credential ? encrypt(b.credential.replace(/^Bearer\s+/i, '')) : old?.credential || '',
     refreshCookie: b.refreshCookie ? encrypt(b.refreshCookie.replace(/^Cookie:\s*/i, '')) : old?.refreshCookie || '',
     pricingCookie: b.pricingCookie ? encrypt(b.pricingCookie.replace(/^Cookie:\s*/i, '')) : old?.pricingCookie || '',
@@ -219,11 +219,12 @@ app.post('/api/accounts/:id/browser-open', auth, async (req, res) => {
       }
     });
     waitForBrowserLogin(account.baseUrl, opened.targetId).then(captured => {
-      mutateStore(latest => {
+      const accepted = mutateStore(latest => {
         const saved = latest.accounts.find(item => item.id === account.id);
-        if (!saved || saved.browserCaptureId !== captureId) return;
+        if (!saved || saved.browserCaptureId !== captureId) return false;
         if (captured.accessToken) saved.browserAccessToken = encrypt(captured.accessToken);
         if (captured.refreshCookie) saved.refreshCookie = encrypt(captured.refreshCookie);
+        if (captured.userId) saved.userId = captured.userId;
         if (!captured.accessToken && !captured.refreshCookie && captured.sessionCookie
           && (saved.panelType !== 'generic' || saved.authType === 'cookie')) {
           saved.credential = encrypt(captured.sessionCookie);
@@ -232,7 +233,9 @@ app.post('/api/accounts/:id/browser-open', auth, async (req, res) => {
         saved.browserCaptureStatus = 'captured';
         saved.browserCaptureAt = new Date().toISOString();
         saved.browserCaptureError = '';
+        return true;
       });
+      if (accepted) return runAccount(account.id, 'poll');
     }).catch(error => {
       mutateStore(latest => {
         const saved = latest.accounts.find(item => item.id === account.id);

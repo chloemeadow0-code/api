@@ -200,6 +200,31 @@ export function bearerTokenFromResponseText(text = '', ignoredTokens = []) {
   return visit(data);
 }
 
+export function userIdFromAuthResponseText(text = '', accessToken = '') {
+  let data;
+  try { data = JSON.parse(String(text || '')); } catch { data = null; }
+  const roots = [data?.data?.user, data?.user, data?.data].filter(value => value && typeof value === 'object');
+  for (const root of roots) {
+    for (const key of ['id', 'user_id', 'userId', 'uid']) {
+      const value = String(root?.[key] ?? '').trim();
+      if (value && value !== '0') return value;
+    }
+  }
+  const token = String(accessToken || bearerTokenFromResponseText(text)).replace(/^Bearer\s+/i, '');
+  const payload = token.split('.')[1];
+  if (!payload) return '';
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    for (const key of ['user_id', 'userId', 'uid', 'id']) {
+      const value = String(claims?.[key] ?? '').trim();
+      if (value && value !== '0') return value;
+    }
+    const subject = String(claims?.sub ?? '').trim();
+    if (/^[1-9]\d*$/.test(subject)) return subject;
+  } catch {}
+  return '';
+}
+
 export function refreshCookieFromBrowserCookies(cookies = []) {
   const candidates = cookies.filter(cookie => cookie?.name && cookie?.value
     && /refresh/i.test(cookie.name)
@@ -220,13 +245,14 @@ export function sessionCookieFromBrowserCookies(cookies = []) {
   return candidates.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
 }
 
-function responseTokenListener(client, finish, ignoredTokens = [], ready = () => true) {
+function responseTokenListener(client, finish, ignoredTokens = [], ready = () => true, observe = () => {}) {
   return client.on('Network.responseReceived', event => {
-    if (!ready()) return;
+    if (!ready(event)) return;
     const contentType = String(event?.response?.mimeType || event?.response?.headers?.['content-type'] || event?.response?.headers?.['Content-Type'] || '');
     if (!/json/i.test(contentType)) return;
     client.call('Network.getResponseBody', { requestId: event.requestId }).then(result => {
       const text = result?.base64Encoded ? Buffer.from(result.body || '', 'base64').toString('utf8') : result?.body || '';
+      observe(text, event);
       const token = bearerTokenFromResponseText(text, ignoredTokens);
       if (token) finish(token);
     }).catch(() => {});
@@ -578,7 +604,7 @@ export async function waitForBrowserLogin(baseUrl, targetId = '', timeoutMs = 18
   if (!target) throw new Error('没有找到正在登录的浏览器页面');
   const client = await connectCdp(target.webSocketDebuggerUrl);
   let accessToken = '';
-  let offRequest = () => {};
+  let userId = '';
   let offResponse = () => {};
   try {
     await client.call('Runtime.enable');
@@ -589,10 +615,12 @@ export async function waitForBrowserLogin(baseUrl, targetId = '', timeoutMs = 18
     const initialCookies = await readCookies();
     const initialRefresh = refreshCookieFromBrowserCookies(initialCookies);
     const initialSession = sessionCookieFromBrowserCookies(initialCookies);
-    offRequest = client.on('Network.requestWillBeSent', event => {
-      accessToken ||= bearerTokenFromHeaders(event?.request?.headers);
+    offResponse = responseTokenListener(client, token => {
+      accessToken ||= token;
+      userId ||= userIdFromAuthResponseText('', token);
+    }, [], event => /login|sign.?in|auth|oauth|callback|refresh/i.test(String(event?.response?.url || '')), text => {
+      userId ||= userIdFromAuthResponseText(text);
     });
-    offResponse = responseTokenListener(client, token => { accessToken ||= token; });
     const deadline = Date.now() + Math.max(10000, Number(timeoutMs) || 180000);
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -600,17 +628,18 @@ export async function waitForBrowserLogin(baseUrl, targetId = '', timeoutMs = 18
       const refreshCookie = refreshCookieFromBrowserCookies(cookies);
       const sessionCookie = sessionCookieFromBrowserCookies(cookies);
       if (accessToken || (refreshCookie && refreshCookie !== initialRefresh) || (sessionCookie && sessionCookie !== initialSession)) {
+        userId ||= userIdFromAuthResponseText('', accessToken);
+        if (!userId) await new Promise(resolve => setTimeout(resolve, 300));
         if (accessToken && !refreshCookie && !sessionCookie) {
           await new Promise(resolve => setTimeout(resolve, 300));
           const settled = await readCookies().catch(() => []);
-          return { accessToken, refreshCookie: refreshCookieFromBrowserCookies(settled), sessionCookie: sessionCookieFromBrowserCookies(settled) };
+          return { accessToken, refreshCookie: refreshCookieFromBrowserCookies(settled), sessionCookie: sessionCookieFromBrowserCookies(settled), userId };
         }
-        return { accessToken, refreshCookie, sessionCookie };
+        return { accessToken, refreshCookie, sessionCookie, userId };
       }
     }
     throw new Error('等待登录完成超时');
   } finally {
-    offRequest();
     offResponse();
     client.close();
   }
