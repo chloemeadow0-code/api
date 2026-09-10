@@ -3,7 +3,7 @@ import net from 'node:net';
 import { decrypt, encrypt, mutateStore, readStore } from './store.js';
 import { accessTokenInBrowser, checkinInBrowser, refreshInBrowser, requestInBrowser } from './browser.js';
 import { readInviteCount, recordInviteCount } from './invite-alerts.js';
-import { fallbackTopupQuoteAmount, minimumTopupFromError, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from './cost.js';
+import { fallbackTopupQuoteAmount, minimumTopupFromError, rechargeConversionFromPublicPrice, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from './cost.js';
 
 const accountRunQueues = new Map();
 
@@ -697,6 +697,10 @@ async function runNewApi(account, action) {
       else topupQuoteError = String(quote?.data ?? quote?.message ?? quote?.error ?? '报价接口没有返回有效金额');
     }
   } catch (error) { topupQuoteError = error.message; }
+  if (!topupQuoteConversion) {
+    topupQuoteConversion = rechargeConversionFromPublicPrice(findConfig(config, ['price', 'Price']));
+    if (topupQuoteConversion) topupQuoteError = '';
+  }
   return { balance: formatQuota(rawBalance, config, account.currency || 'auto'), rawBalance, quotaPerUnit, userGroup, quotaDisplayType, usdExchangeRate, rechargeConversion, topupQuoteConversion, topupQuoteError, topupQuoteCheckedAt: new Date().toISOString(), inviteCount: readInviteCount(data), checkin };
 }
 

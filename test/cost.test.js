@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fallbackTopupQuoteAmount, gatewayCostSummary, minimumTopupFromError, modelPriceSnapshot, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from '../src/cost.js';
+import { fallbackTopupQuoteAmount, gatewayCostSummary, minimumTopupFromError, modelPriceSnapshot, rechargeConversionFromPublicPrice, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from '../src/cost.js';
 
 test('reads the latest successful New API topup as a real conversion rate', () => {
   const response = { data: { items: [
@@ -33,6 +33,10 @@ test('builds a read-only recharge quote conversion from the minimum topup', () =
   });
   assert.equal(rechargeConversionFromQuote({ success: true, data: '7.20' }, 1000000, 500000, 'TOKENS').cnyPerUsd, 3.6);
   assert.equal(rechargeConversionFromQuote({ success: false, data: 'bad' }, 10), null);
+  assert.deepEqual(rechargeConversionFromPublicPrice('0.36'), {
+    faceAmountUsd: 1, paidCny: 0.36, cnyPerUsd: 0.36, source: 'status_price'
+  });
+  assert.equal(rechargeConversionFromPublicPrice(0), null);
 });
 
 test('snapshots model prices and estimates real savings from successful usage', () => {

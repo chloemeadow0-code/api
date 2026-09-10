@@ -89,6 +89,17 @@ export function rechargeConversionFromQuote(response, requestedAmount, quotaPerU
   };
 }
 
+export function rechargeConversionFromPublicPrice(value) {
+  const cnyPerUsd = Number(value);
+  if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) return null;
+  return {
+    faceAmountUsd: 1,
+    paidCny: cnyPerUsd,
+    cnyPerUsd,
+    source: 'status_price'
+  };
+}
+
 function tokenPrices(model, account) {
   let input = model?.inputPriceUsd === null || model?.inputPriceUsd === undefined ? NaN : Number(model.inputPriceUsd);
   let output = model?.outputPriceUsd === null || model?.outputPriceUsd === undefined ? NaN : Number(model.outputPriceUsd);
