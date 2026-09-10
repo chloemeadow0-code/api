@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gatewayCostSummary, minimumTopupFromError, modelPriceSnapshot, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from '../src/cost.js';
+import { fallbackTopupQuoteAmount, gatewayCostSummary, minimumTopupFromError, modelPriceSnapshot, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from '../src/cost.js';
 
 test('reads the latest successful New API topup as a real conversion rate', () => {
   const response = { data: { items: [
@@ -21,8 +21,12 @@ test('converts token-displayed recharge quota to nominal dollars', () => {
 });
 
 test('builds a read-only recharge quote conversion from the minimum topup', () => {
-  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 10, amount_options: [20, 50] } }), 10);
-  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 2 } }, 500000, 'TOKENS'), 1000000);
+  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 10, amount_options: [20, 50] } }), 20);
+  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 2 } }, 500000, 'TOKENS'), 5000000);
+  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 1, amount_options: '[5, 20]' } }), 5);
+  assert.equal(topupQuoteRequestAmount({}), 10);
+  assert.equal(fallbackTopupQuoteAmount(10), 100);
+  assert.equal(fallbackTopupQuoteAmount(5000000, 500000, 'TOKENS'), 50000000);
   assert.equal(minimumTopupFromError({ message: 'error', data: '充值数量不能小于 1000' }), 1000);
   assert.deepEqual(rechargeConversionFromQuote({ success: true, data: '3.60' }, 10), {
     faceAmountUsd: 10, paidCny: 3.6, cnyPerUsd: 0.36, requestedAmount: 10, source: 'topup_quote'

@@ -40,19 +40,30 @@ function responseData(response) {
 
 export function topupQuoteRequestAmount(response, quotaPerUnit = 500000, quotaDisplayType = 'USD') {
   const data = responseData(response) || {};
-  const configured = data.amount_options ?? data.amountOptions ?? data.amounts;
+  let configured = data.amount_options ?? data.amountOptions ?? data.amounts;
+  if (typeof configured === 'string') {
+    try { configured = JSON.parse(configured); } catch { configured = configured.split(/[,，\s]+/); }
+  }
   const options = Array.isArray(configured)
     ? configured
     : configured && typeof configured === 'object' ? Object.keys(configured) : [];
   const positiveOptions = options.map(Number).filter(value => Number.isFinite(value) && value > 0);
   const minimum = Number(data.min_topup ?? data.minTopup);
-  const nominalAmount = Number.isFinite(minimum) && minimum > 0
-    ? minimum
-    : positiveOptions.length ? Math.min(...positiveOptions) : 1;
+  const validMinimum = Number.isFinite(minimum) && minimum > 0 ? minimum : 0;
+  const nominalAmount = positiveOptions.length
+    ? Math.max(validMinimum, Math.min(...positiveOptions))
+    : Math.max(validMinimum, 10);
   if (String(quotaDisplayType || '').toUpperCase() !== 'TOKENS') return Math.max(1, Math.ceil(nominalAmount));
   const divisor = Number(quotaPerUnit);
   if (!Number.isFinite(divisor) || divisor <= 0) return null;
   return Math.max(1, Math.ceil(nominalAmount * divisor));
+}
+
+export function fallbackTopupQuoteAmount(requestedAmount, quotaPerUnit = 500000, quotaDisplayType = 'USD') {
+  const requested = Number(requestedAmount);
+  if (!Number.isFinite(requested) || requested <= 0) return null;
+  if (String(quotaDisplayType || '').toUpperCase() === 'TOKENS') return Math.ceil(requested * 10);
+  return Math.ceil(Math.max(100, requested * 10));
 }
 
 export function minimumTopupFromError(response) {

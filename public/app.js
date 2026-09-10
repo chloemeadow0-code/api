@@ -95,6 +95,7 @@ function render(data) {
       ${a.refreshMode === 'browser' ? `<span class="browser-badge">服务器浏览器登录态${a.browserLoginAction ? ` · 自动点 ${esc(a.browserLoginAction)}` : ''}</span>` : ''}
       <div class="balance">${esc(a.balance ?? '—')}</div>
       ${a.topupQuoteConversion ? `<div class="recharge-rate"><span>当前最低充值档换算</span><strong>¥${Number(a.topupQuoteConversion.paidCny).toFixed(2)} → ${Number(a.topupQuoteConversion.faceAmountUsd).toFixed(2)} 站内额度</strong><small>用于额度价值估算，不代表已经充值</small></div>` : ''}
+      ${!a.topupQuoteConversion && a.topupQuoteError ? `<div class="recharge-rate"><span>充值换算暂不可用</span><small>${esc(a.topupQuoteError)}</small></div>` : ''}
       ${a.rechargeConversion ? `<div class="recharge-rate"><span>最近真实充值</span><strong>¥${Number(a.rechargeConversion.paidCny).toFixed(2)} → ${Number(a.rechargeConversion.faceAmountUsd).toFixed(2)} 站内额度</strong><small>每 1 站内额度实付 ¥${Number(a.rechargeConversion.cnyPerUsd).toFixed(4)}</small></div>` : ''}
       <div class="model-box"><strong>${esc(a.modelName || '尚未选择模型')}</strong><span>${esc(priceWithEstimate(a.modelPrice) || (a.hasApiKey ? '点击选择模型并查看价格' : '请先编辑并填写 API Key'))}</span></div>
       <p class="meta">${a.lastError ? esc(a.lastError) : a.lastCheckinMessage ? esc(a.lastCheckinMessage) : a.lastCheckedAt ? '更新于 ' + new Date(a.lastCheckedAt).toLocaleString() : '等待首次刷新'}</p>
