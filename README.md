@@ -24,17 +24,19 @@ npm start
 
 ## 接入站点
 
-默认提供 New API / One API 多站点模板。每个站点只需填写名称、根地址、登录 Cookie 和数字用户 ID，程序会自动发送 `Cookie` 与 `New-Api-User` 请求头，读取 `/api/user/self` 的额度，并调用 `/api/user/checkin` 签到。可以重复添加任意数量的站点。
+默认提供 New API / One API 多站点模板。推荐在“登录凭据类型”选择“长期 PAT / Bearer”，这样云端可直接调用且不依赖浏览器；旧站仍可填写登录 Cookie 和数字用户 ID，程序会发送 `Cookie` 与 `New-Api-User` 请求头。两种方式都会读取 `/api/user/self` 的额度，并调用 `/api/user/checkin` 签到，可以重复添加任意数量的站点。
 
 特殊站点可选择“自定义 JSON API”：填写余额接口与 JSON 字段路径、签到接口，以及 Bearer Token、Cookie 或自定义请求头凭据。例如余额响应为 `{ "data": { "points": 120 } }`，余额字段填 `data.points`。短期 Bearer 还可填写刷新接口和 `new_api_refresh` Cookie；请求遇到 401 时会自动刷新、保存轮换凭据并重试一次。
 若站点余额使用 Bearer、模型价格接口却使用浏览器登录 Cookie，可单独填写“价格 Cookie”；它只用于价格接口，不会覆盖余额与签到凭据。
 
-Bearer 自动刷新会识别 HTTP 401、403，以及常见的 Unauthorized、invalid access token、未登录等过期响应；刷新成功后保存轮换后的 Token 与 Cookie，并自动重试原请求一次。
+Bearer 自动刷新会识别 HTTP 401、403，以及常见的 Unauthorized、invalid access token、未登录等过期响应；刷新成功后保存轮换后的 Token 与 Cookie，并自动重试原请求一次。标准 New API 可只填写 Refresh Cookie，刷新接口留空时自动使用 `/api/user/auth/refresh`；每次 401 最多续期并重试一次，不会循环刷新。标准 New API 的 Refresh Cookie 最长有效期仍由站点决定，彻底失效后才需要重新登录一次。
 同一站点的手动刷新、批量轮询、签到和定时任务会进入独立串行队列，避免并发请求重复使用一次性 refresh Cookie，或由旧任务覆盖轮换后的新 Cookie。
 
 对刷新会话绑定登录 IP 的站点，可在“自定义 JSON API”中把续期方式改为“服务器浏览器”。保存后在站点卡片点击“浏览器登录”，进入受管理员会话保护的远程 Chromium，并在里面登录该站一次。浏览器资料保存在 `/data/browser-profile`；之后该站遇到 401 时，会在同一服务器浏览器内刷新 Bearer，还会从浏览器登录存储或网页实际请求中捕获最新 Access Token 并加密保存；整个恢复流程最多尝试两次，第二次仍未取得令牌就立即失败。只需为确实需要的站点启用，其他站点继续使用轻量的普通接口刷新。
 
 即使站点配置了自动登录账号，恢复时也会先复用并刷新当前已经登录的页面，从登录后的接口请求或刷新响应中提取令牌；只有当前登录态确实无法产生令牌时，才会进入登录页重新填写账号密码。
+
+服务器浏览器成功恢复 New API 登录后，会通过浏览器调试接口自动收取该站 HttpOnly Refresh Cookie 并加密保存。后续 401 优先直接从云端调用刷新接口并保存轮换值，不再为了每次续期打开站点页面；只有 Refresh Cookie 彻底失效才退回浏览器登录。
 
 服务器浏览器默认只保留 1 个页面、只执行 1 个浏览器任务，重复打开同一站点会复用已有页面，自动登录产生的临时页面会在结束后回收，避免批量签到、后台轮询和多次 401 重试同时挤占内存。可通过 `BROWSER_MAX_TABS` 调整保留页数，通过 `BROWSER_RENDERER_PROCESS_LIMIT` 调整 Chromium 渲染进程上限。
 

@@ -200,6 +200,16 @@ export function bearerTokenFromResponseText(text = '', ignoredTokens = []) {
   return visit(data);
 }
 
+export function refreshCookieFromBrowserCookies(cookies = []) {
+  const candidates = cookies.filter(cookie => cookie?.name && cookie?.value
+    && /refresh/i.test(cookie.name)
+    && !/has.?session/i.test(cookie.name));
+  candidates.sort((left, right) => Number(Boolean(right.httpOnly)) - Number(Boolean(left.httpOnly))
+    || Number(/auth/i.test(right.path || '')) - Number(/auth/i.test(left.path || '')));
+  const cookie = candidates[0];
+  return cookie ? `${cookie.name}=${cookie.value}` : '';
+}
+
 function responseTokenListener(client, finish, ignoredTokens = [], ready = () => true) {
   return client.on('Network.responseReceived', event => {
     if (!ready()) return;
@@ -497,6 +507,22 @@ async function accessTokenInBrowserUnlocked(baseUrl, loginOptions = {}) {
 
 export function accessTokenInBrowser(baseUrl, loginOptions = {}) {
   return runBrowserOperation(() => accessTokenInBrowserUnlocked(baseUrl, loginOptions));
+}
+
+async function refreshCookieInBrowserUnlocked(baseUrl) {
+  const origin = new URL(baseUrl).origin;
+  let target = (await pageTargets().catch(() => []))[0];
+  if (!target) target = await cdpTarget('about:blank', { activate: false });
+  const client = await connectCdp(target.webSocketDebuggerUrl);
+  try {
+    await client.call('Network.enable');
+    const result = await client.call('Network.getCookies', { urls: [`${origin}/`, `${origin}/api/user/auth/refresh`] });
+    return refreshCookieFromBrowserCookies(result?.cookies || []);
+  } finally { client.close(); }
+}
+
+export function refreshCookieInBrowser(baseUrl) {
+  return runBrowserOperation(() => refreshCookieInBrowserUnlocked(baseUrl));
 }
 
 async function waitForOrigin(client, origin) {

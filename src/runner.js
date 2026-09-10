@@ -1,7 +1,7 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { decrypt, encrypt, mutateStore, readStore } from './store.js';
-import { accessTokenInBrowser, checkinInBrowser, refreshInBrowser, requestInBrowser } from './browser.js';
+import { accessTokenInBrowser, checkinInBrowser, refreshCookieInBrowser, refreshInBrowser, requestInBrowser } from './browser.js';
 import { readInviteCount, recordInviteCount } from './invite-alerts.js';
 import { fallbackTopupQuoteAmount, minimumTopupFromError, rechargeConversionFromPublicPrice, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from './cost.js';
 
@@ -50,38 +50,79 @@ export function tokenFromRefresh(data) {
 
 export function refreshCookieFromHeaders(headers, fallback = '') {
   const values = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [headers.get('set-cookie') || ''];
-  const match = values.join(',').match(/(?:^|[,;]\s*)(new_api_refresh=[^;,\s]+)/i);
-  return match?.[1] || fallback;
+  const joined = values.join(',');
+  const fallbackName = String(fallback).split('=', 1)[0].trim();
+  const names = [fallbackName, 'new_api_refresh', 'refresh_token'].filter(Boolean);
+  for (const name of [...new Set(names)]) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = joined.match(new RegExp(`(?:^|[,]\\s*)(${escaped}=[^;,\\s]+)`, 'i'));
+    if (match?.[1]) return match[1];
+  }
+  const refreshLike = joined.match(/(?:^|[,]\s*)((?:__Secure-)?[^=;,\s]*refresh[^=;,\s]*=[^;,\s]+)/i);
+  return refreshLike?.[1] || fallback;
 }
 
-async function refreshBearer(account) {
-  if (account.authType !== 'bearer' || !account.refreshPath) return false;
-  if (account.refreshMode === 'browser') {
-    const data = await refreshInBrowser(account.baseUrl, account.refreshPath);
-    const token = tokenFromRefresh(data);
-    if (!token) throw new Error('服务器浏览器刷新成功，但响应中没有新的 Access Token');
-    account.credential = encrypt(token);
-    // Browser-mode requests prefer browserAccessToken. Replace it too, or the
-    // freshly refreshed credential is immediately overwritten by the expired
-    // browser token on the retry.
-    account.browserAccessToken = encrypt(token);
+export function refreshPathFor(account, panelType = 'generic') {
+  if (account.refreshPath) return account.refreshPath;
+  return panelType === 'newapi' && account.refreshCookie ? '/api/user/auth/refresh' : '';
+}
+
+export function newApiCredentialHeaders(account, credential = '') {
+  const headers = {};
+  if (account.userId) headers['new-api-user'] = String(account.userId);
+  if (!credential) return headers;
+  if (account.newApiCredentialType === 'bearer') headers.authorization = `Bearer ${credential.replace(/^Bearer\s+/i, '')}`;
+  else headers.cookie = credential;
+  return headers;
+}
+
+function persistRefreshedAuth(account) {
+  mutateStore(latest => {
+    const saved = latest.accounts.find(item => item.id === account.id);
+    if (!saved) return;
+    if (account.refreshCookie) saved.refreshCookie = account.refreshCookie;
+    if (account.browserAccessToken) saved.browserAccessToken = account.browserAccessToken;
+    if (account.credential) saved.credential = account.credential;
+  });
+}
+
+async function refreshBearer(account, panelType = 'generic', allowBrowser = true) {
+  if (panelType === 'generic' && account.authType !== 'bearer') return false;
+  const refreshPath = refreshPathFor(account, panelType);
+  if (account.refreshCookie && refreshPath) {
+    const url = await safeUrl(account.baseUrl, refreshPath);
+    const origin = new URL(account.baseUrl).origin;
+    const currentCookie = decrypt(account.refreshCookie);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { accept: 'application/json, text/plain, */*', cookie: currentCookie, origin, referer: `${origin}/` },
+      redirect: 'error', signal: AbortSignal.timeout(15000)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`云端令牌续期失败：${data?.message || data?.error || `HTTP ${response.status}`} (HTTP ${response.status})`);
+    const token = tokenFromRefresh(data) || String(response.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!token) throw new Error('云端令牌续期成功，但响应中没有新的 Access Token');
+    if (panelType === 'newapi') {
+      account.browserAccessToken = encrypt(token);
+      account.preferSessionAccessToken = true;
+    }
+    else account.credential = encrypt(token);
+    account.refreshCookie = encrypt(refreshCookieFromHeaders(response.headers, currentCookie));
+    persistRefreshedAuth(account);
     return true;
   }
-  if (!account.refreshCookie) return false;
-  const url = await safeUrl(account.baseUrl, account.refreshPath);
-  const currentCookie = decrypt(account.refreshCookie);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { accept: 'application/json, text/plain, */*', cookie: currentCookie, origin: account.baseUrl, referer: `${account.baseUrl}/` },
-    redirect: 'error', signal: AbortSignal.timeout(15000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`自动刷新失败：${data?.message || data?.error || `HTTP ${response.status}`} (HTTP ${response.status})`);
-  const token = tokenFromRefresh(data) || String(response.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!token) throw new Error('刷新接口成功，但响应中没有新的 Access Token');
-  account.credential = encrypt(token);
-  account.refreshCookie = encrypt(refreshCookieFromHeaders(response.headers, currentCookie));
-  return true;
+  if (!refreshPath || account.refreshMode !== 'browser' || !allowBrowser) return false;
+  if (account.refreshMode === 'browser') {
+    const data = await refreshInBrowser(account.baseUrl, refreshPath);
+    const token = tokenFromRefresh(data);
+    if (!token) throw new Error('服务器浏览器刷新成功，但响应中没有新的 Access Token');
+    if (panelType === 'generic') account.credential = encrypt(token);
+    account.browserAccessToken = encrypt(token);
+    if (panelType === 'newapi') account.preferSessionAccessToken = true;
+    persistRefreshedAuth(account);
+    return true;
+  }
+  return false;
 }
 
 export function isExpiredAuthentication(status, data) {
@@ -179,6 +220,10 @@ function browserAuthHeaders(account, panelType, includeCredential = false) {
   const headers = panelType === 'newapi' ? { 'new-api-user': String(account.userId || '') } : {};
   if (!includeCredential) return headers;
   if (account.browserAccessToken) return { ...headers, authorization: `Bearer ${decrypt(account.browserAccessToken)}` };
+  if (panelType === 'newapi' && account.newApiCredentialType === 'bearer') {
+    const credential = decrypt(account.credential);
+    return credential ? { ...headers, authorization: `Bearer ${credential}` } : headers;
+  }
   const token = panelType === 'generic' ? decrypt(account.credential) : '';
   if (!token) return headers;
   if (account.authType === 'bearer') return { authorization: `Bearer ${token}` };
@@ -197,16 +242,30 @@ async function recoverWithBrowserOnce(account, endpoint, method, panelType, body
     const token = await accessTokenInBrowser(account.baseUrl, { ...browserLoginOptions(account), ignoredTokens });
     if (token) {
       const previousBrowserAccessToken = account.browserAccessToken;
+      const previousSessionPreference = account.preferSessionAccessToken;
       account.browserAccessToken = encrypt(token);
+      account.preferSessionAccessToken = true;
+      const capturedRefreshCookie = await refreshCookieInBrowser(account.baseUrl).catch(() => '');
+      if (capturedRefreshCookie) {
+        account.refreshCookie = encrypt(capturedRefreshCookie);
+        mutateStore(latest => {
+          const saved = latest.accounts.find(item => item.id === account.id);
+          if (saved) saved.refreshCookie = account.refreshCookie;
+        });
+      }
       try {
         const data = await requestInBrowser(account.baseUrl, endpoint, method, browserAuthHeaders(account, panelType, true), body);
         mutateStore(latest => {
           const saved = latest.accounts.find(item => item.id === account.id);
-          if (saved) saved.browserAccessToken = account.browserAccessToken;
+          if (saved) {
+            saved.browserAccessToken = account.browserAccessToken;
+            if (account.refreshCookie) saved.refreshCookie = account.refreshCookie;
+          }
         });
         return { data };
       } catch (error) {
         account.browserAccessToken = previousBrowserAccessToken;
+        account.preferSessionAccessToken = previousSessionPreference;
         if (isAuthenticationError(error)) rejectedTokens.add(token);
         if (isRateLimitedError(error)) throw error;
         throw error;
@@ -239,10 +298,9 @@ async function recoverAuthentication(account, endpoint, method, panelType, retri
   if (retried || panelType === 'public') return null;
   const allowBrowserRecovery = options.allowBrowserRecovery !== false;
   let refreshError = null;
-  if (panelType === 'generic' && (allowBrowserRecovery || account.refreshMode !== 'browser')) {
-    try {
-      if (await refreshBearer(account)) {
-        if (account.refreshMode !== 'browser') return { retry: true };
+  try {
+    if (await refreshBearer(account, panelType, allowBrowserRecovery)) {
+        if (account.refreshCookie || account.refreshMode !== 'browser') return { retry: true };
         try {
           const data = await requestInBrowser(account.baseUrl, endpoint, method, browserAuthHeaders(account, panelType, true), body);
           return { data };
@@ -250,11 +308,10 @@ async function recoverAuthentication(account, endpoint, method, panelType, retri
           if (isRateLimitedError(error)) throw error;
           refreshError = error;
         }
-      }
-    } catch (error) {
-      if (isRateLimitedError(error)) throw error;
-      refreshError = error;
     }
+  } catch (error) {
+    if (isRateLimitedError(error)) throw error;
+    refreshError = error;
   }
   if (shouldUseBrowserSession(account, panelType, retried, allowBrowserRecovery)) {
     const rejectedTokens = new Set();
@@ -280,14 +337,16 @@ async function call(account, endpoint, method, panelType = 'generic', retried = 
   };
   const token = decrypt(account.credential);
   if (panelType === 'newapi') {
-    headers.cookie = token;
-    headers['new-api-user'] = String(account.userId || '');
+    Object.assign(headers, newApiCredentialHeaders(account, token));
   } else if (panelType !== 'public') {
     if (account.authType === 'bearer') headers.authorization = `Bearer ${token}`;
     if (account.authType === 'cookie') headers.cookie = token;
     if (account.authType === 'header') headers[account.headerName || 'authorization'] = token;
   }
-  if (account.refreshMode === 'browser' && account.browserAccessToken) headers.authorization = `Bearer ${decrypt(account.browserAccessToken)}`;
+  const permanentPat = panelType === 'newapi' && account.newApiCredentialType === 'bearer' && token;
+  if (panelType !== 'public' && account.browserAccessToken && (!permanentPat || account.preferSessionAccessToken)) {
+    headers.authorization = `Bearer ${decrypt(account.browserAccessToken)}`;
+  }
   const requestBody = !['GET', 'HEAD'].includes(method) && body ? body : undefined;
   if (requestBody) headers['content-type'] = 'application/json';
   const response = await fetch(url, { method, headers, body: requestBody, redirect: 'manual', signal: AbortSignal.timeout(15000) });
@@ -402,7 +461,7 @@ export function pricingAuthType(account) {
 }
 
 export function pricingRequestAccount(account) {
-  return account.pricingCookie ? { ...account, authType: 'cookie', credential: account.pricingCookie } : account;
+  return account.pricingCookie ? { ...account, authType: 'cookie', newApiCredentialType: 'cookie', credential: account.pricingCookie, browserAccessToken: '' } : account;
 }
 
 export function modelCategory(name) {
@@ -658,8 +717,8 @@ export function classifyCheckin(data) {
 }
 
 async function runNewApi(account, action) {
-  if (!account.userId) throw new Error('请填写用户 ID');
-  if (!account.credential && account.refreshMode !== 'browser') throw new Error('请填写登录 Cookie');
+  if (account.newApiCredentialType !== 'bearer' && !account.userId) throw new Error('Cookie 登录请填写用户 ID');
+  if (!account.credential && !account.refreshCookie && account.refreshMode !== 'browser') throw new Error('请填写长期 PAT、登录 Cookie 或 Refresh Cookie');
   let checkin;
   if (action === 'checkin') checkin = await runCheckin(account, '/api/user/checkin', 'newapi');
   let config = {};

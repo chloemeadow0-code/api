@@ -1,11 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, retryBrowserConnection, reusableBlankBrowserTarget } from '../src/browser.js';
-import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
+import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, refreshCookieFromBrowserCookies, retryBrowserConnection, reusableBlankBrowserTarget } from '../src/browser.js';
+import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, newApiCredentialHeaders, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, refreshPathFor, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
 
 test('reads rotated bearer credentials from refresh responses', () => {
   assert.equal(tokenFromRefresh({ success: true, data: { access_token: 'Bearer fresh-token' } }), 'fresh-token');
   assert.equal(refreshCookieFromHeaders(new Headers({ 'set-cookie': 'new_api_refresh=rotated; Path=/api/user/auth; HttpOnly' }), 'old'), 'new_api_refresh=rotated');
+});
+
+test('uses the standard New API refresh endpoint and keeps custom paths', () => {
+  assert.equal(refreshPathFor({ refreshCookie: 'encrypted' }, 'newapi'), '/api/user/auth/refresh');
+  assert.equal(refreshPathFor({ refreshCookie: 'encrypted', refreshPath: '/custom/refresh' }, 'newapi'), '/custom/refresh');
+  assert.equal(refreshPathFor({ refreshCookie: 'encrypted' }, 'generic'), '');
+});
+
+test('builds compatible New API Cookie and PAT headers', () => {
+  assert.deepEqual(newApiCredentialHeaders({ userId: '12' }, 'session=abc'), { 'new-api-user': '12', cookie: 'session=abc' });
+  assert.deepEqual(newApiCredentialHeaders({ newApiCredentialType: 'bearer' }, 'Bearer pat-value'), { authorization: 'Bearer pat-value' });
+});
+
+test('captures the HttpOnly refresh cookie from a browser profile', () => {
+  assert.equal(refreshCookieFromBrowserCookies([
+    { name: 'new_api_has_session', value: '1', path: '/' },
+    { name: 'new_api_refresh', value: 'secret', path: '/api/user/auth', httpOnly: true }
+  ]), 'new_api_refresh=secret');
 });
 
 test('refreshes bearer auth for nonstandard expired-login responses', () => {
@@ -263,6 +281,8 @@ test('pricing can use a dedicated cookie without changing balance auth', () => {
   const account = { authType: 'bearer', credential: 'bearer-secret', pricingCookie: 'encrypted-cookie' };
   const pricing = pricingRequestAccount(account);
   assert.equal(pricing.authType, 'cookie');
+  assert.equal(pricing.newApiCredentialType, 'cookie');
+  assert.equal(pricing.browserAccessToken, '');
   assert.equal(pricing.credential, 'encrypted-cookie');
   assert.equal(account.authType, 'bearer');
 });

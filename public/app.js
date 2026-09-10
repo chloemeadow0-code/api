@@ -92,7 +92,8 @@ function render(data) {
       <div class="top"><strong>${esc(a.name)}</strong><span class="drag-handle" title="拖动排序">⋮⋮</span><span class="status ${a.lastStatus === 'error' ? 'error' : ''}">${a.lastStatus === 'error' ? '异常' : a.lastStatus === 'ok' ? '正常' : '未运行'}</span></div>
       <div class="site-tags">${(a.tags || []).map(tag => `<span>${esc(tag)}</span>`).join('') || '<span class="empty-tag">未设置标签</span>'}</div>
       <a class="site-link" href="${esc(a.baseUrl)}" target="_blank" rel="noopener noreferrer">打开站点 ↗</a>
-      ${a.refreshMode === 'browser' ? `<span class="browser-badge">服务器浏览器登录态${a.browserLoginAction ? ` · 自动点 ${esc(a.browserLoginAction)}` : ''}</span>` : ''}
+      ${a.refreshMode === 'browser' ? `<span class="browser-badge">${a.hasRefreshCookie ? '云端续期 · 浏览器备用' : '服务器浏览器登录态'}${a.browserLoginAction ? ` · 自动点 ${esc(a.browserLoginAction)}` : ''}</span>` : ''}
+      ${a.refreshMode !== 'browser' && a.hasRefreshCookie ? '<span class="browser-badge">云端令牌自动续期</span>' : ''}
       <div class="balance">${esc(a.balance ?? '—')}</div>
       ${a.topupQuoteConversion ? `<div class="recharge-rate"><span>${a.topupQuoteConversion.source === 'status_price' ? '站点公开充值比例' : '当前最低充值档换算'}</span><strong>¥${Number(a.topupQuoteConversion.paidCny).toFixed(4)} → ${Number(a.topupQuoteConversion.faceAmountUsd).toFixed(2)} 站内额度</strong><small>${a.topupQuoteConversion.source === 'status_price' ? '报价接口不可用时按站点公开 price 配置估算' : '用于额度价值估算，不代表已经充值'}</small></div>` : ''}
       ${!a.topupQuoteConversion && a.topupQuoteError ? `<div class="recharge-rate"><span>充值换算暂不可用</span><small>${esc(a.topupQuoteError)}</small></div>` : ''}
