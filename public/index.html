@@ -78,7 +78,7 @@
     </div>
     <div class="grid"><label>刷新接口<input name="refreshPath" placeholder="New API 可留空，默认 /api/user/auth/refresh"></label><label>Refresh Cookie<input name="refreshCookie" class="credential" type="password" placeholder="只填 refresh 那一项；留空则保留"></label></div>
     <label>登录保持方式<select name="refreshMode"><option value="http">云端令牌 / Cookie（推荐）</option><option value="browser">服务器浏览器（最后备用）</option></select></label>
-    <p class="hint">遇到 401 时最多处理一次：优先用 Refresh Cookie 在云端换取 Access Token、保存轮换后的 Cookie 并重试原请求一次；没有可用令牌时才启动服务器浏览器。标准 New API 的刷新接口无需填写。</p>
+    <p class="hint">遇到 401 时最多处理一次：优先用 Refresh Cookie 在云端换取 Access Token、保存轮换后的 Cookie 并重试原请求一次；没有可用令牌时才启动服务器浏览器。点“浏览器登录”后，登录成功会自动解析并保存令牌，无需再复制 Cookie。标准 New API 的刷新接口无需填写。</p>
     <label>失效后自动点击的登录按钮<input name="browserLoginAction" placeholder="例如 Sign in；留空可使用服务器环境变量"></label>
     <p class="hint">自动登录资料只从服务器环境变量读取。账号密码登录的完整顺序：先点登录入口，再填写账号密码、勾选协议并提交。单站设置 BROWSER_LOGIN_ACCOUNT、BROWSER_LOGIN_ACTION、BROWSER_LOGIN_USERNAME、BROWSER_LOGIN_PASSWORD，需要协议时再加 BROWSER_LOGIN_AGREE=true；多站使用 BROWSER_LOGIN_ACCOUNTS_JSON 并加入 agree:true。GitHub 登录可再设置第二步按钮：单站用 BROWSER_LOGIN_NEXT_ACTION=Continue with GitHub；多站 JSON 使用 nextAction:"Continue with GitHub"。GitHub 账号本身需先在服务器浏览器登录一次。</p>
     <p class="hint">已登录但签到需要 Turnstile 的站点，单独使用 BROWSER_CHECKIN_ACCOUNTS_JSON，例如 {"站点名":{"action":"Check in","path":"/profile","turnstile":true}}。程序会先点击 Check in，再等待验证码完成并接收签到结果；它与登录配置、用户协议 agree 不重复。</p>
@@ -103,6 +103,6 @@
   <div id="modelCategories" class="model-categories"></div>
   <div id="modelChoices" class="model-choices"></div>
 </dialog>
-<script src="/app.js?v=20260910-65"></script>
+<script src="/app.js?v=20260910-66"></script>
 </body>
 </html>

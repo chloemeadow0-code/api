@@ -77,6 +77,8 @@ test('custom bearer accounts can save automatic refresh settings', () => {
   assert.match(html, /服务器浏览器/);
   assert.match(html, /Refresh Cookie/);
   assert.match(source, /\/browser-open/);
+  assert.match(source, /browserCaptureStatus/);
+  assert.match(html, /自动解析并保存令牌/);
 });
 
 test('server browser routes require the admin session', () => {
@@ -87,6 +89,7 @@ test('server browser routes require the admin session', () => {
   assert.match(source, /app\.get\('\/browser', auth/);
   assert.match(source, /app\.use\('\/browser', auth/);
   assert.match(source, /validSession\(cookies\(req\)\.session, sessionSecret\)/);
+  assert.match(source, /waitForBrowserLogin/);
   assert.match(dockerfile, /chromium/);
   assert.match(startup, /\/data\/browser-profile/);
   assert.match(startup, /SingletonLock/);

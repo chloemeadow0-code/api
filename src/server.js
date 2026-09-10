@@ -1,12 +1,12 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import net from 'node:net';
-import { encrypt, readStore, writeStore } from './store.js';
+import { encrypt, mutateStore, readStore, writeStore } from './store.js';
 import { estimateAccountCalls, refreshModelCatalog, refreshModelPrice, runAccount, runAll, safeUrl, testModelConnection } from './runner.js';
 import { installGateway } from './gateway.js';
 import { createSession, validSession } from './session.js';
 import { gatewayStatistics } from './stats.js';
-import { browserAvailable, openBrowserLogin } from './browser.js';
+import { browserAvailable, openBrowserLogin, waitForBrowserLogin } from './browser.js';
 import { clearPriceAlerts, dismissPriceAlert, markPriceAlertsRead, priceAlertsView, scanPriceAlerts, setPriceAlertPinned } from './price-alerts.js';
 import { clearInviteAlerts, dismissInviteAlert, inviteAlertsView } from './invite-alerts.js';
 
@@ -208,7 +208,41 @@ app.post('/api/accounts/:id/browser-open', auth, async (req, res) => {
     if (!account) return res.status(404).json({ error: '账户不存在' });
     if (account.refreshMode !== 'browser') return res.status(400).json({ error: '请先把续期方式设为服务器浏览器' });
     const url = await safeUrl(account.baseUrl, '/');
-    res.json(await openBrowserLogin(url.href));
+    const opened = await openBrowserLogin(url.href);
+    const captureId = crypto.randomUUID();
+    mutateStore(latest => {
+      const saved = latest.accounts.find(item => item.id === account.id);
+      if (saved) {
+        saved.browserCaptureId = captureId;
+        saved.browserCaptureStatus = 'waiting';
+        saved.browserCaptureError = '';
+      }
+    });
+    waitForBrowserLogin(account.baseUrl, opened.targetId).then(captured => {
+      mutateStore(latest => {
+        const saved = latest.accounts.find(item => item.id === account.id);
+        if (!saved || saved.browserCaptureId !== captureId) return;
+        if (captured.accessToken) saved.browserAccessToken = encrypt(captured.accessToken);
+        if (captured.refreshCookie) saved.refreshCookie = encrypt(captured.refreshCookie);
+        if (!captured.accessToken && !captured.refreshCookie && captured.sessionCookie
+          && (saved.panelType !== 'generic' || saved.authType === 'cookie')) {
+          saved.credential = encrypt(captured.sessionCookie);
+          saved.newApiCredentialType = 'cookie';
+        }
+        saved.browserCaptureStatus = 'captured';
+        saved.browserCaptureAt = new Date().toISOString();
+        saved.browserCaptureError = '';
+      });
+    }).catch(error => {
+      mutateStore(latest => {
+        const saved = latest.accounts.find(item => item.id === account.id);
+        if (!saved || saved.browserCaptureId !== captureId) return;
+        saved.browserCaptureStatus = /超时/.test(error.message) ? 'timeout' : 'error';
+        saved.browserCaptureError = error.message;
+      });
+    });
+    const { targetId: _targetId, ...result } = opened;
+    res.json({ ...result, capture: 'waiting' });
   } catch (e) { res.status(503).json({ error: e.message }); }
 });
 app.post('/api/accounts/:id/:action', auth, async (req, res) => { try { res.json(await runAccount(req.params.id, req.params.action)); } catch (e) { res.status(400).json({ error: e.message }); } });

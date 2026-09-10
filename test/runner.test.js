@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, refreshCookieFromBrowserCookies, retryBrowserConnection, reusableBlankBrowserTarget } from '../src/browser.js';
+import { bearerTokenFromHeaders, bearerTokenFromResponseText, browserTargetIdsToClose, createSerialBrowserQueue, isLastBrowserPage, normalizeLoginActionText, orderBrowserTargetsForRecovery, refreshCookieFromBrowserCookies, retryBrowserConnection, reusableBlankBrowserTarget, sessionCookieFromBrowserCookies } from '../src/browser.js';
 import { browserCheckinOptions, browserLoginOptions, buildModelCatalog, buildPerCallCatalog, classifyCheckin, estimateAccountCalls, estimateRemainingCalls, formatNewApiQuota, formatQuota, hasModelPricing, isAuthenticationError, isExpiredAuthentication, isHtmlResponse, isRateLimitedError, modelApiUrl, modelCategory, modelsFromPricing, newApiCredentialHeaders, pricingAuthType, pricingGroupRatio, pricingRequestAccount, readConfiguredBalance, readRemainingQuota, refreshCookieFromHeaders, refreshPathFor, retryTwice, serializeAccountRun, shouldPoll, shouldUseBrowserSession, summarizeModelPrice, tokenFromRefresh, valueAt } from '../src/runner.js';
 
 test('reads rotated bearer credentials from refresh responses', () => {
@@ -24,6 +24,14 @@ test('captures the HttpOnly refresh cookie from a browser profile', () => {
     { name: 'new_api_has_session', value: '1', path: '/' },
     { name: 'new_api_refresh', value: 'secret', path: '/api/user/auth', httpOnly: true }
   ]), 'new_api_refresh=secret');
+});
+
+test('captures legacy session cookies without treating refresh hints as login', () => {
+  assert.equal(sessionCookieFromBrowserCookies([
+    { name: 'new_api_has_session', value: '1' },
+    { name: 'cf_clearance', value: 'challenge' },
+    { name: 'session', value: 'signed-login', httpOnly: true }
+  ]), 'session=signed-login');
 });
 
 test('refreshes bearer auth for nonstandard expired-login responses', () => {

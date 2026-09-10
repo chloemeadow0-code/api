@@ -210,6 +210,16 @@ export function refreshCookieFromBrowserCookies(cookies = []) {
   return cookie ? `${cookie.name}=${cookie.value}` : '';
 }
 
+export function sessionCookieFromBrowserCookies(cookies = []) {
+  const candidates = cookies.filter(cookie => cookie?.name && cookie?.value
+    && /session|auth|login|access.?token|jwt/i.test(cookie.name)
+    && !/refresh|has.?session|csrf|xsrf|cloudflare|^cf_/i.test(cookie.name));
+  candidates.sort((left, right) => Number(Boolean(right.httpOnly)) - Number(Boolean(left.httpOnly))
+    || Number(/session|auth/i.test(right.name)) - Number(/session|auth/i.test(left.name))
+    || String(left.name).localeCompare(String(right.name)));
+  return candidates.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+}
+
 function responseTokenListener(client, finish, ignoredTokens = [], ready = () => true) {
   return client.on('Network.responseReceived', event => {
     if (!ready()) return;
@@ -550,15 +560,60 @@ async function openBrowserLoginUnlocked(baseUrl) {
     await fetch(`${cdpBase}/json/activate/${encodeURIComponent(existing.id)}`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
     await pruneBrowserTargets([existing.id]);
     scheduleManualPageCleanup(existing.id);
-    return { ok: true, url: existing.url || url, reused: true };
+    return { ok: true, url: existing.url || url, reused: true, targetId: existing.id };
   }
   const target = await cdpTarget(url);
   scheduleManualPageCleanup(target.id);
-  return { ok: true, url };
+  return { ok: true, url, targetId: target.id };
 }
 
 export function openBrowserLogin(baseUrl) {
   return runBrowserOperation(() => openBrowserLoginUnlocked(baseUrl));
+}
+
+export async function waitForBrowserLogin(baseUrl, targetId = '', timeoutMs = 180000) {
+  const origin = new URL(baseUrl).origin;
+  const target = (await pageTargets()).find(item => item.id === targetId)
+    || (await existingOriginTargets(origin))[0];
+  if (!target) throw new Error('没有找到正在登录的浏览器页面');
+  const client = await connectCdp(target.webSocketDebuggerUrl);
+  let accessToken = '';
+  let offRequest = () => {};
+  let offResponse = () => {};
+  try {
+    await client.call('Runtime.enable');
+    await client.call('Network.enable');
+    const readCookies = async () => (await client.call('Network.getCookies', {
+      urls: [`${origin}/`, `${origin}/api/user/auth/refresh`]
+    })).cookies || [];
+    const initialCookies = await readCookies();
+    const initialRefresh = refreshCookieFromBrowserCookies(initialCookies);
+    const initialSession = sessionCookieFromBrowserCookies(initialCookies);
+    offRequest = client.on('Network.requestWillBeSent', event => {
+      accessToken ||= bearerTokenFromHeaders(event?.request?.headers);
+    });
+    offResponse = responseTokenListener(client, token => { accessToken ||= token; });
+    const deadline = Date.now() + Math.max(10000, Number(timeoutMs) || 180000);
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const cookies = await readCookies().catch(() => []);
+      const refreshCookie = refreshCookieFromBrowserCookies(cookies);
+      const sessionCookie = sessionCookieFromBrowserCookies(cookies);
+      if (accessToken || (refreshCookie && refreshCookie !== initialRefresh) || (sessionCookie && sessionCookie !== initialSession)) {
+        if (accessToken && !refreshCookie && !sessionCookie) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const settled = await readCookies().catch(() => []);
+          return { accessToken, refreshCookie: refreshCookieFromBrowserCookies(settled), sessionCookie: sessionCookieFromBrowserCookies(settled) };
+        }
+        return { accessToken, refreshCookie, sessionCookie };
+      }
+    }
+    throw new Error('等待登录完成超时');
+  } finally {
+    offRequest();
+    offResponse();
+    client.close();
+  }
 }
 
 async function checkinInBrowserUnlocked(baseUrl, endpoint, options = {}) {
