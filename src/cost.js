@@ -67,7 +67,7 @@ export function modelPriceSnapshot(account, modelName = account?.modelName) {
 function eventNominalUsd(event, account) {
   const snapshot = event.billing ? event : { ...modelPriceSnapshot(account, event.modelName), ...event };
   if (snapshot.billing === 'call' && Number.isFinite(Number(snapshot.callPriceUsd))) {
-    return { nominalUsd: Number(snapshot.callPriceUsd), tokenSplitEstimated: false };
+    return { nominalUsd: Number(snapshot.callPriceUsd), tokenSplitEstimated: false, billing: 'call', callPriceUsd: Number(snapshot.callPriceUsd) };
   }
   if (snapshot.billing !== 'token') return null;
   const inputTokens = Number(snapshot.inputTokens);
@@ -79,31 +79,44 @@ function eventNominalUsd(event, account) {
   if ([inputTokens, outputTokens].every(Number.isFinite) && inputTokens + outputTokens > 0) {
     return {
       nominalUsd: inputTokens * inputPrice / 1000000 + outputTokens * outputPrice / 1000000,
-      tokenSplitEstimated: false
+      tokenSplitEstimated: false,
+      billing: 'token', inputPriceUsd: inputPrice, outputPriceUsd: outputPrice
     };
   }
   if (Number.isFinite(totalTokens) && totalTokens > 0) {
-    return { nominalUsd: totalTokens * inputPrice / 1000000, tokenSplitEstimated: true };
+    return { nominalUsd: totalTokens * inputPrice / 1000000, tokenSplitEstimated: true, billing: 'token', inputPriceUsd: inputPrice, outputPriceUsd: outputPrice };
   }
   return null;
 }
 
+function emptyCostTotals() {
+  return {
+    nominalUsd: 0, referenceCny: 0, actualCny: 0, savedCny: 0,
+    pricedRequests: 0, freeCreditEstimates: 0, tokenSplitEstimates: 0
+  };
+}
+
+function addCost(target, nominalUsd, referenceCny, actualCny, freeCredit, tokenSplitEstimated) {
+  target.nominalUsd += nominalUsd;
+  target.referenceCny += referenceCny;
+  target.actualCny += actualCny;
+  target.savedCny += referenceCny - actualCny;
+  target.pricedRequests += 1;
+  if (freeCredit) target.freeCreditEstimates += 1;
+  if (tokenSplitEstimated) target.tokenSplitEstimates += 1;
+}
+
 export function gatewayCostSummary(events = [], accounts = []) {
   const accountMap = new Map(accounts.map(account => [account.id, account]));
-  const coveredSites = new Set();
+  const coveredSites = new Set(); const historicalSites = new Set(); const breakdown = new Map();
   const totals = {
-    nominalUsd: 0,
-    referenceCny: 0,
-    actualCny: 0,
-    savedCny: 0,
+    ...emptyCostTotals(),
     totalSuccessful: 0,
-    pricedRequests: 0,
     historicalEstimates: 0,
-    freeCreditEstimates: 0,
-    tokenSplitEstimates: 0,
     missingPriceOrUsage: 0,
     coveredSites: 0
   };
+  const historical = emptyCostTotals();
   for (const event of events) {
     if (event.action !== 'gateway' || event.status !== 'ok') continue;
     totals.totalSuccessful += 1;
@@ -119,16 +132,32 @@ export function gatewayCostSummary(events = [], accounts = []) {
     const hasRecharge = Number.isFinite(rechargeRate) && rechargeRate > 0;
     const referenceCny = nominalUsd * exchangeRate;
     const actualCny = hasRecharge ? nominalUsd * rechargeRate : 0;
-    totals.nominalUsd += nominalUsd;
-    totals.referenceCny += referenceCny;
-    totals.actualCny += actualCny;
-    totals.savedCny += referenceCny - actualCny;
-    totals.pricedRequests += 1;
-    if (!event.billing) totals.historicalEstimates += 1;
-    if (!hasRecharge) totals.freeCreditEstimates += 1;
-    if (calculated.tokenSplitEstimated) totals.tokenSplitEstimates += 1;
-    coveredSites.add(account.id);
+    const estimated = !event.billing;
+    const target = estimated ? historical : totals;
+    addCost(target, nominalUsd, referenceCny, actualCny, !hasRecharge, calculated.tokenSplitEstimated);
+    (estimated ? historicalSites : coveredSites).add(account.id);
+    if (estimated) totals.historicalEstimates += 1;
+
+    const modelName = event.modelName || account?.modelName || '未知模型';
+    const breakdownKey = `${account?.id || event.accountId || ''}\u0000${modelName}\u0000${estimated ? 'historical' : 'snapshot'}`;
+    if (!breakdown.has(breakdownKey)) breakdown.set(breakdownKey, {
+      accountId: account?.id || event.accountId || '', accountName: account?.name || '已删除站点', modelName,
+      estimated, billing: calculated.billing, requests: 0, nominalUsd: 0, referenceCny: 0, actualCny: 0, savedCny: 0,
+      inputTokens: 0, outputTokens: 0, totalTokens: 0, tokenSplitEstimates: 0, priceLabels: new Set()
+    });
+    const row = breakdown.get(breakdownKey);
+    row.requests += 1; row.nominalUsd += nominalUsd; row.referenceCny += referenceCny;
+    row.actualCny += actualCny; row.savedCny += referenceCny - actualCny;
+    row.inputTokens += Number(event.inputTokens) || 0; row.outputTokens += Number(event.outputTokens) || 0;
+    row.totalTokens += Number(event.totalTokens) || (Number(event.inputTokens) || 0) + (Number(event.outputTokens) || 0);
+    if (calculated.tokenSplitEstimated) row.tokenSplitEstimates += 1;
+    if (calculated.billing === 'call') row.priceLabels.add(`$${Number(calculated.callPriceUsd).toFixed(6)} / 次`);
+    else row.priceLabels.add(`输入 $${Number(calculated.inputPriceUsd).toFixed(4)} / 1M · 输出 $${Number(calculated.outputPriceUsd).toFixed(4)} / 1M`);
   }
   totals.coveredSites = coveredSites.size;
+  totals.historical = { ...historical, coveredSites: historicalSites.size };
+  totals.breakdown = [...breakdown.values()]
+    .map(row => ({ ...row, priceLabels: [...row.priceLabels] }))
+    .sort((a, b) => b.referenceCny - a.referenceCny || b.nominalUsd - a.nominalUsd);
   return totals;
 }

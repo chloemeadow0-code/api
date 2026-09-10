@@ -312,18 +312,34 @@ window.loadStats = async () => {
     $('#referenceCost').textContent = money(data.costs?.referenceCny);
     $('#actualCost').textContent = money(data.costs?.actualCny);
     const saved = Number(data.costs?.savedCny || 0);
-    $('#savingLabel').textContent = saved < 0 ? '比市场价多花' : '累计节省';
+    $('#savingLabel').textContent = saved < 0 ? '可信金额多花' : '可信累计节省';
     $('#savedCost').textContent = money(Math.abs(saved));
     const costs = data.costs || {};
     const costDetails = [
-      `${Number(costs.pricedRequests || 0).toLocaleString()} / ${Number(costs.totalSuccessful || 0).toLocaleString()} 次调用已换算`,
+      `${Number(costs.pricedRequests || 0).toLocaleString()} / ${Number(costs.totalSuccessful || 0).toLocaleString()} 次带价格快照`,
       `${Number(costs.coveredSites || 0)} 个站点`
     ];
-    if (Number(costs.historicalEstimates || 0) > 0) costDetails.push(`旧记录估算 ${Number(costs.historicalEstimates).toLocaleString()} 次`);
     if (Number(costs.freeCreditEstimates || 0) > 0) costDetails.push(`${Number(costs.freeCreditEstimates).toLocaleString()} 次无充值，按免费额度`);
     if (Number(costs.tokenSplitEstimates || 0) > 0) costDetails.push(`${Number(costs.tokenSplitEstimates).toLocaleString()} 次仅总 Token 估算`);
     if (Number(costs.missingPriceOrUsage || 0) > 0) costDetails.push(`${Number(costs.missingPriceOrUsage).toLocaleString()} 次缺价格或用量`);
     $('#pricedRequests').textContent = costDetails.join(' · ');
+    const historical = costs.historical || {};
+    $('#historicalSavedCost').textContent = money(Math.abs(Number(historical.savedCny || 0)));
+    const historicalDetails = [
+      `${Number(historical.pricedRequests || 0).toLocaleString()} 次旧调用`,
+      `${Number(historical.coveredSites || 0).toLocaleString()} 个站点`,
+      `模型标价 $${Number(historical.nominalUsd || 0).toFixed(4)}`,
+      `额度价值 ${money(historical.referenceCny)}`
+    ];
+    if (Number(historical.tokenSplitEstimates || 0) > 0) historicalDetails.push(`${Number(historical.tokenSplitEstimates).toLocaleString()} 次仅总 Token 估算`);
+    $('#historicalCostSummary').textContent = `${historicalDetails.join(' · ')}。旧日志没有调用时价格，不计入上方可信总额。`;
+    const costRows = (costs.breakdown || []).map(row => {
+      const kind = row.estimated ? '旧估算' : '可信快照';
+      const usage = row.billing === 'call' ? `${Number(row.requests || 0).toLocaleString()} 次` : `${Number(row.totalTokens || 0).toLocaleString()} Token`;
+      const estimateNote = Number(row.tokenSplitEstimates || 0) > 0 ? ` · ${Number(row.tokenSplitEstimates).toLocaleString()} 次仅总 Token` : '';
+      return `<div class="cost-breakdown-row ${row.estimated ? 'estimated' : 'trusted'}"><span><strong>${esc(row.accountName)} · ${esc(row.modelName)}</strong><small>${kind} · ${esc((row.priceLabels || []).join(' / ') || '价格未知')} · ${usage}${estimateNote}</small></span><em><strong>$${Number(row.nominalUsd || 0).toFixed(4)}</strong><small>额度价值 ${money(row.referenceCny)} · 节省 ${money(row.savedCny)}</small></em></div>`;
+    }).join('');
+    $('#costBreakdown').innerHTML = costRows || '<p>暂无可计算的费用记录。</p>';
     $('#trendTitle').textContent = `近 ${range} 天请求`;
     const max = Math.max(1, ...data.days.map(day => day.requests));
     $('#trendChart').innerHTML = data.days.map(day => `<div class="trend-day"><div class="trend-bar"><i style="height:${Math.max(day.requests ? 8 : 2, day.requests / max * 100)}%"></i></div><strong>${day.requests}</strong><span>${esc(day.date.slice(5))}</span></div>`).join('');

@@ -6,7 +6,7 @@ test('gateway statistics count logical requests, switches and rankings', () => {
   const runs = [
     { id: 'a1', requestId: 'a', attempt: 1, action: 'gateway', accountId: 'one', modelName: 'gpt-a', status: 'error', latencyMs: 100, startedAt: '2026-09-05T01:00:00Z' },
     { id: 'a2', requestId: 'a', attempt: 2, action: 'gateway', accountId: 'two', modelName: 'gpt-b', status: 'ok', latencyMs: 200, startedAt: '2026-09-05T01:00:01Z' },
-    { id: 'b1', requestId: 'b', attempt: 1, action: 'gateway', accountId: 'one', modelName: 'gpt-a', status: 'ok', latencyMs: 300, inputTokens: 100, outputTokens: 20, cachedTokens: 60, totalTokens: 120, startedAt: '2026-09-05T02:00:00Z' },
+    { id: 'b1', requestId: 'b', attempt: 1, action: 'gateway', accountId: 'one', modelName: 'gpt-a', status: 'ok', latencyMs: 300, billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10, inputTokens: 100, outputTokens: 20, cachedTokens: 60, totalTokens: 120, startedAt: '2026-09-05T02:00:00Z' },
     { id: 'poll', action: 'poll', accountId: 'one', status: 'ok', startedAt: '2026-09-05T02:00:00Z' }
   ];
   const accounts = [

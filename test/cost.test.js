@@ -58,9 +58,13 @@ test('backfills historical usage with the logged model instead of the currently 
   const summary = gatewayCostSummary([
     { action: 'gateway', status: 'ok', accountId: 'a', modelName: 'old-model', inputTokens: 1000000, outputTokens: 0 }
   ], [account]);
-  assert.equal(summary.nominalUsd, 2);
-  assert.equal(summary.pricedRequests, 1);
+  assert.equal(summary.nominalUsd, 0);
+  assert.equal(summary.pricedRequests, 0);
+  assert.equal(summary.historical.nominalUsd, 2);
+  assert.equal(summary.historical.pricedRequests, 1);
   assert.equal(summary.historicalEstimates, 1);
+  assert.equal(summary.breakdown[0].estimated, true);
+  assert.equal(summary.breakdown[0].modelName, 'old-model');
 });
 
 test('treats usage without a recharge record as free credit savings', () => {
@@ -69,7 +73,7 @@ test('treats usage without a recharge record as free credit savings', () => {
     models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
   }];
   const summary = gatewayCostSummary([
-    { action: 'gateway', status: 'ok', accountId: 'free', modelName: 'gpt', inputTokens: 1000000, outputTokens: 0 }
+    { action: 'gateway', status: 'ok', accountId: 'free', modelName: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10, inputTokens: 1000000, outputTokens: 0 }
   ], accounts);
   assert.equal(summary.nominalUsd, 2);
   assert.equal(summary.referenceCny, 14.4);
@@ -86,8 +90,9 @@ test('estimates old usage from total tokens when the input/output split is missi
   const summary = gatewayCostSummary([
     { action: 'gateway', status: 'ok', accountId: 'total-only', modelName: 'gpt', inputTokens: 0, outputTokens: 0, totalTokens: 500000 }
   ], accounts);
-  assert.equal(summary.nominalUsd, 1);
-  assert.equal(summary.tokenSplitEstimates, 1);
+  assert.equal(summary.nominalUsd, 0);
+  assert.equal(summary.historical.nominalUsd, 1);
+  assert.equal(summary.historical.tokenSplitEstimates, 1);
 });
 
 test('reports successful requests that still lack model price or token usage', () => {

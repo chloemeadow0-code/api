@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#fff4f8">
   <title>站点积分台</title>
-  <link rel="stylesheet" href="/style.css?v=20260909-62">
+  <link rel="stylesheet" href="/style.css?v=20260910-63">
 </head>
 <body>
 <main>
@@ -21,11 +21,13 @@
     <section id="cards" class="cards"></section>
     </div>
     <div id="statsView" class="page-view hidden">
-      <section class="stats-title"><div><p class="eyebrow">ACTUAL GATEWAY DATA</p><h2>调用统计</h2><p>按成功调用的真实用量和站点最近一次成功充值换算成本。</p></div><div class="refresh-box"><small id="statsUpdatedAt">尚未刷新</small><button class="ghost" onclick="loadStats()">刷新统计</button></div></section>
+      <section class="stats-title"><div><p class="eyebrow">ACTUAL GATEWAY DATA</p><h2>调用统计</h2><p>可信金额只统计调用时已经保存价格的记录，旧记录估算单独展示。</p></div><div class="refresh-box"><small id="statsUpdatedAt">尚未刷新</small><button class="ghost" onclick="loadStats()">刷新统计</button></div></section>
       <section class="panel stats-filters"><label>站点<select id="statsAccount" onchange="loadStats()"><option value="">全部站点</option></select></label><label>模型<select id="statsModel" onchange="loadStats()"><option value="">全部模型</option></select></label><p id="statsScope">当前范围：全部站点 · 全部模型</p></section>
       <section class="stats gateway-summary"><article><span>今日请求</span><strong id="todayRequests">0</strong></article><article><span>今日成功率</span><strong id="todaySuccessRate">0%</strong></article><article><span>本月请求</span><strong id="monthRequests">0</strong></article><article><span>累计成功 / 失败</span><strong id="allResults">0 / 0</strong></article><article><span>首站命中率</span><strong id="firstHitRate">0%</strong></article><article><span>自动切换</span><strong id="switchCount">0</strong></article><article><span>平均耗时</span><strong id="averageLatency">—</strong></article><article><span>P95 耗时</span><strong id="p95Latency">—</strong></article></section>
       <section class="token-summary"><article><span>输入 Token</span><strong id="inputTokens">0</strong><small id="todayInputTokens">今日 0</small></article><article><span>输出 Token</span><strong id="outputTokens">0</strong><small id="todayOutputTokens">今日 0</small></article><article><span>缓存 Token</span><strong id="cachedTokens">0</strong><small id="todayCachedTokens">今日 0</small></article><article><span>总 Token</span><strong id="totalTokens">0</strong><small id="measuredRequests">0 次返回用量</small></article></section>
-      <section class="token-summary cost-summary"><article><span>模型标价</span><strong id="nominalCost">$0.00</strong><small>按实际 Token 与模型价格计算</small></article><article><span>已用额度价值</span><strong id="referenceCost">¥0.00</strong><small>按站点美元/人民币换算率</small></article><article><span>实际支付</span><strong id="actualCost">¥0.00</strong><small>无充值记录时按免费额度 ¥0 计算</small></article><article><span id="savingLabel">累计节省</span><strong id="savedCost">¥0.00</strong><small id="pricedRequests">0 / 0 次调用已换算</small></article></section>
+      <section class="token-summary cost-summary"><article><span>可信模型标价</span><strong id="nominalCost">$0.00</strong><small>仅使用调用时保存的价格</small></article><article><span>可信额度价值</span><strong id="referenceCost">¥0.00</strong><small>按站点美元/人民币换算率</small></article><article><span>实际支付</span><strong id="actualCost">¥0.00</strong><small>无充值记录时按免费额度 ¥0 计算</small></article><article><span id="savingLabel">可信累计节省</span><strong id="savedCost">¥0.00</strong><small id="pricedRequests">0 / 0 次带价格快照</small></article></section>
+      <section class="panel historical-cost-panel"><div class="panel-heading"><div><p class="eyebrow">HISTORICAL ESTIMATE</p><h2>旧记录估算（仅参考）</h2></div><strong id="historicalSavedCost">¥0.0000</strong></div><p id="historicalCostSummary">旧日志没有调用时单价，不计入上方可信总额。</p></section>
+      <section class="panel cost-breakdown-panel"><div class="panel-heading"><div><p class="eyebrow">COST BREAKDOWN</p><h2>费用来源明细</h2></div><small>按额度价值从高到低</small></div><div id="costBreakdown" class="cost-breakdown"><p>暂无可计算的费用记录。</p></div></section>
       <section class="panel stats-panel"><div class="panel-heading"><h2 id="trendTitle">近 7 天请求</h2><select id="trendRange" onchange="loadStats()"><option value="7">近 7 天</option><option value="30">近 30 天</option></select></div><div id="trendChart" class="trend-chart"></div></section>
       <section class="ranking-grid"><section class="panel"><h2>站点排行</h2><div id="siteRanking" class="ranking"></div></section><section class="panel"><h2>模型排行</h2><div id="modelRanking" class="ranking"></div></section></section>
       <section class="ranking-grid"><section class="panel"><h2>失败原因</h2><div id="failureRanking" class="ranking compact-ranking"></div></section><section class="panel"><h2>接口分布</h2><div id="endpointRanking" class="ranking compact-ranking"></div></section></section>

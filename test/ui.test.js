@@ -200,6 +200,9 @@ test('gateway statistics show recharge-adjusted cost and savings', () => {
   assert.match(html, /id="savedCost"/);
   assert.match(source, /rechargeConversion/);
   assert.match(source, /pricedRequests/);
+  assert.match(html, /id="historicalSavedCost"/);
+  assert.match(html, /id="costBreakdown"/);
+  assert.match(source, /costs\.breakdown/);
 });
 
 test('left navigation includes unread per-call price alerts', () => {
