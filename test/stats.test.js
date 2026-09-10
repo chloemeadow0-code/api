@@ -10,7 +10,7 @@ test('gateway statistics count logical requests, switches and rankings', () => {
     { id: 'poll', action: 'poll', accountId: 'one', status: 'ok', startedAt: '2026-09-05T02:00:00Z' }
   ];
   const accounts = [
-    { id: 'one', name: '一号', rechargeConversion: { cnyPerUsd: 3.6 }, usdExchangeRate: 7.2, modelName: 'gpt-a', models: [{ name: 'gpt-a', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }] },
+    { id: 'one', name: '一号', rechargeConversion: { cnyPerUsd: 3.6 }, topupQuoteConversion: { cnyPerUsd: 7.2 }, usdExchangeRate: 7.2, modelName: 'gpt-a', models: [{ name: 'gpt-a', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }] },
     { id: 'two', name: '二号' }
   ];
   const stats = gatewayStatistics(runs, accounts, new Date('2026-09-05T03:00:00Z'), 'UTC');

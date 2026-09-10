@@ -94,7 +94,8 @@ function render(data) {
       <a class="site-link" href="${esc(a.baseUrl)}" target="_blank" rel="noopener noreferrer">打开站点 ↗</a>
       ${a.refreshMode === 'browser' ? `<span class="browser-badge">服务器浏览器登录态${a.browserLoginAction ? ` · 自动点 ${esc(a.browserLoginAction)}` : ''}</span>` : ''}
       <div class="balance">${esc(a.balance ?? '—')}</div>
-      ${a.rechargeConversion ? `<div class="recharge-rate"><span>最近充值</span><strong>¥${Number(a.rechargeConversion.paidCny).toFixed(2)} → $${Number(a.rechargeConversion.faceAmountUsd).toFixed(2)} 额度</strong><small>每 $1 额度实付 ¥${Number(a.rechargeConversion.cnyPerUsd).toFixed(4)}</small></div>` : ''}
+      ${a.topupQuoteConversion ? `<div class="recharge-rate"><span>当前最低充值档换算</span><strong>¥${Number(a.topupQuoteConversion.paidCny).toFixed(2)} → ${Number(a.topupQuoteConversion.faceAmountUsd).toFixed(2)} 站内额度</strong><small>用于额度价值估算，不代表已经充值</small></div>` : ''}
+      ${a.rechargeConversion ? `<div class="recharge-rate"><span>最近真实充值</span><strong>¥${Number(a.rechargeConversion.paidCny).toFixed(2)} → ${Number(a.rechargeConversion.faceAmountUsd).toFixed(2)} 站内额度</strong><small>每 1 站内额度实付 ¥${Number(a.rechargeConversion.cnyPerUsd).toFixed(4)}</small></div>` : ''}
       <div class="model-box"><strong>${esc(a.modelName || '尚未选择模型')}</strong><span>${esc(priceWithEstimate(a.modelPrice) || (a.hasApiKey ? '点击选择模型并查看价格' : '请先编辑并填写 API Key'))}</span></div>
       <p class="meta">${a.lastError ? esc(a.lastError) : a.lastCheckinMessage ? esc(a.lastCheckinMessage) : a.lastCheckedAt ? '更新于 ' + new Date(a.lastCheckedAt).toLocaleString() : '等待首次刷新'}</p>
       <div class="card-actions"><button onclick="run('${a.id}','poll',this)">刷新</button><button class="secondary" onclick="run('${a.id}','checkin',this)">签到</button><button class="ghost" onclick="openTagPicker('${a.id}')">选择标签</button><button class="ghost" onclick="openModels('${a.id}')">选择模型</button><button class="ghost" onclick="testModel('${a.id}',this)">测试模型</button>${a.refreshMode === 'browser' ? `<button class="ghost" onclick="openServerBrowser('${a.id}')">浏览器登录</button>` : ''}<button class="ghost" onclick="edit('${a.id}')">编辑</button><button class="ghost" onclick="removeAccount('${a.id}')">删除</button></div>
@@ -315,7 +316,7 @@ window.loadStats = async () => {
     $('#cachedTokens').textContent = data.tokens.all.cached.toLocaleString(); $('#todayCachedTokens').textContent = `今日 ${data.tokens.today.cached.toLocaleString()}`;
     $('#totalTokens').textContent = data.tokens.all.total.toLocaleString(); $('#measuredRequests').textContent = `${data.tokens.all.measured.toLocaleString()} 次返回用量`;
     const money = value => `¥${Number(value || 0).toFixed(4)}`;
-    $('#nominalCost').textContent = `$${Number(data.costs?.nominalUsd || 0).toFixed(4)}`;
+    $('#nominalCost').textContent = `${Number(data.costs?.nominalUsd || 0).toFixed(4)} 额度`;
     $('#referenceCost').textContent = money(data.costs?.referenceCny);
     $('#actualCost').textContent = money(data.costs?.actualCny);
     const saved = Number(data.costs?.savedCny || 0);
@@ -329,13 +330,14 @@ window.loadStats = async () => {
     if (Number(costs.freeCreditEstimates || 0) > 0) costDetails.push(`${Number(costs.freeCreditEstimates).toLocaleString()} 次无充值，按免费额度`);
     if (Number(costs.tokenSplitEstimates || 0) > 0) costDetails.push(`${Number(costs.tokenSplitEstimates).toLocaleString()} 次仅总 Token 估算`);
     if (Number(costs.missingPriceOrUsage || 0) > 0) costDetails.push(`${Number(costs.missingPriceOrUsage).toLocaleString()} 次缺价格或用量`);
+    if (Number(costs.missingConversion || 0) > 0) costDetails.push(`${Number(costs.missingConversion).toLocaleString()} 次未取得充值换算`);
     $('#pricedRequests').textContent = costDetails.join(' · ');
     const historical = costs.historical || {};
     $('#historicalSavedCost').textContent = money(Math.abs(Number(historical.savedCny || 0)));
     const historicalDetails = [
       `${Number(historical.pricedRequests || 0).toLocaleString()} 次旧调用`,
       `${Number(historical.coveredSites || 0).toLocaleString()} 个站点`,
-      `模型标价 $${Number(historical.nominalUsd || 0).toFixed(4)}`,
+      `站内额度 ${Number(historical.nominalUsd || 0).toFixed(4)}`,
       `额度价值 ${money(historical.referenceCny)}`
     ];
     if (Number(historical.tokenSplitEstimates || 0) > 0) historicalDetails.push(`${Number(historical.tokenSplitEstimates).toLocaleString()} 次仅总 Token 估算`);
@@ -344,7 +346,8 @@ window.loadStats = async () => {
       const kind = row.estimated ? '旧估算' : '可信快照';
       const usage = row.billing === 'call' ? `${Number(row.requests || 0).toLocaleString()} 次` : `${Number(row.totalTokens || 0).toLocaleString()} Token`;
       const estimateNote = Number(row.tokenSplitEstimates || 0) > 0 ? ` · ${Number(row.tokenSplitEstimates).toLocaleString()} 次仅总 Token` : '';
-      return `<div class="cost-breakdown-row ${row.estimated ? 'estimated' : 'trusted'}"><span><strong>${esc(row.accountName)} · ${esc(row.modelName)}</strong><small>${kind} · ${esc((row.priceLabels || []).join(' / ') || '价格未知')} · ${usage}${estimateNote}</small></span><em><strong>$${Number(row.nominalUsd || 0).toFixed(4)}</strong><small>额度价值 ${money(row.referenceCny)} · 节省 ${money(row.savedCny)}</small></em></div>`;
+      const converted = row.conversionAvailable ? `额度价值 ${money(row.referenceCny)} · 节省 ${money(row.savedCny)}` : '未取得本站充值换算，暂不折算人民币';
+      return `<div class="cost-breakdown-row ${row.estimated ? 'estimated' : 'trusted'}"><span><strong>${esc(row.accountName)} · ${esc(row.modelName)}</strong><small>${kind} · ${esc((row.priceLabels || []).join(' / ') || '价格未知')} · ${usage}${estimateNote}</small></span><em><strong>${Number(row.nominalUsd || 0).toFixed(4)} 额度</strong><small>${converted}</small></em></div>`;
     }).join('');
     $('#costBreakdown').innerHTML = costRows || '<p>暂无可计算的费用记录。</p>';
     $('#trendTitle').textContent = `近 ${range} 天请求`;

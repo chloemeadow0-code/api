@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gatewayCostSummary, modelPriceSnapshot, rechargeConversionFromTopups } from '../src/cost.js';
+import { gatewayCostSummary, minimumTopupFromError, modelPriceSnapshot, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from '../src/cost.js';
 
 test('reads the latest successful New API topup as a real conversion rate', () => {
   const response = { data: { items: [
@@ -20,10 +20,22 @@ test('converts token-displayed recharge quota to nominal dollars', () => {
   assert.equal(conversion.cnyPerUsd, 3.6);
 });
 
+test('builds a read-only recharge quote conversion from the minimum topup', () => {
+  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 10, amount_options: [20, 50] } }), 10);
+  assert.equal(topupQuoteRequestAmount({ data: { min_topup: 2 } }, 500000, 'TOKENS'), 1000000);
+  assert.equal(minimumTopupFromError({ message: 'error', data: '充值数量不能小于 1000' }), 1000);
+  assert.deepEqual(rechargeConversionFromQuote({ success: true, data: '3.60' }, 10), {
+    faceAmountUsd: 10, paidCny: 3.6, cnyPerUsd: 0.36, requestedAmount: 10, source: 'topup_quote'
+  });
+  assert.equal(rechargeConversionFromQuote({ success: true, data: '7.20' }, 1000000, 500000, 'TOKENS').cnyPerUsd, 3.6);
+  assert.equal(rechargeConversionFromQuote({ success: false, data: 'bad' }, 10), null);
+});
+
 test('snapshots model prices and estimates real savings from successful usage', () => {
   const account = {
     id: 'a', modelName: 'gpt', quotaPerUnit: 500000, usdExchangeRate: 7.2,
     rechargeConversion: { cnyPerUsd: 3.6 },
+    topupQuoteConversion: { cnyPerUsd: 7.2 },
     models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
   };
   assert.deepEqual(modelPriceSnapshot(account), { billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 });
@@ -67,19 +79,34 @@ test('backfills historical usage with the logged model instead of the currently 
   assert.equal(summary.breakdown[0].modelName, 'old-model');
 });
 
-test('treats usage without a recharge record as free credit savings', () => {
+test('values free credit with the site recharge quote instead of assuming a currency rate', () => {
   const accounts = [{
-    id: 'free', usdExchangeRate: 7.2,
+    id: 'free', usdExchangeRate: 99, topupQuoteConversion: { cnyPerUsd: 3.6 },
     models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
   }];
   const summary = gatewayCostSummary([
     { action: 'gateway', status: 'ok', accountId: 'free', modelName: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10, inputTokens: 1000000, outputTokens: 0 }
   ], accounts);
   assert.equal(summary.nominalUsd, 2);
-  assert.equal(summary.referenceCny, 14.4);
+  assert.equal(summary.referenceCny, 7.2);
   assert.equal(summary.actualCny, 0);
-  assert.equal(summary.savedCny, 14.4);
+  assert.equal(summary.savedCny, 7.2);
   assert.equal(summary.freeCreditEstimates, 1);
+});
+
+test('does not invent RMB value when a site has no recharge conversion', () => {
+  const accounts = [{
+    id: 'unknown-rate', usdExchangeRate: 7.2,
+    models: [{ name: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10 }]
+  }];
+  const summary = gatewayCostSummary([
+    { action: 'gateway', status: 'ok', accountId: 'unknown-rate', modelName: 'gpt', billing: 'token', inputPriceUsd: 2, outputPriceUsd: 10, inputTokens: 1000000, outputTokens: 0 }
+  ], accounts);
+  assert.equal(summary.nominalUsd, 2);
+  assert.equal(summary.referenceCny, 0);
+  assert.equal(summary.savedCny, 0);
+  assert.equal(summary.missingConversion, 1);
+  assert.equal(summary.breakdown[0].conversionAvailable, false);
 });
 
 test('estimates old usage from total tokens when the input/output split is missing', () => {

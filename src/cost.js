@@ -34,6 +34,50 @@ export function rechargeConversionFromTopups(response, quotaPerUnit = 500000, qu
   return rows.length ? { ...rows[0], source: 'topup_history' } : null;
 }
 
+function responseData(response) {
+  return response?.data && typeof response.data === 'object' && !Array.isArray(response.data) ? response.data : response;
+}
+
+export function topupQuoteRequestAmount(response, quotaPerUnit = 500000, quotaDisplayType = 'USD') {
+  const data = responseData(response) || {};
+  const configured = data.amount_options ?? data.amountOptions ?? data.amounts;
+  const options = Array.isArray(configured)
+    ? configured
+    : configured && typeof configured === 'object' ? Object.keys(configured) : [];
+  const positiveOptions = options.map(Number).filter(value => Number.isFinite(value) && value > 0);
+  const minimum = Number(data.min_topup ?? data.minTopup);
+  const nominalAmount = Number.isFinite(minimum) && minimum > 0
+    ? minimum
+    : positiveOptions.length ? Math.min(...positiveOptions) : 1;
+  if (String(quotaDisplayType || '').toUpperCase() !== 'TOKENS') return Math.max(1, Math.ceil(nominalAmount));
+  const divisor = Number(quotaPerUnit);
+  if (!Number.isFinite(divisor) || divisor <= 0) return null;
+  return Math.max(1, Math.ceil(nominalAmount * divisor));
+}
+
+export function minimumTopupFromError(response) {
+  const message = [response?.message, response?.msg, response?.error, response?.data].filter(value => typeof value === 'string').join(' ');
+  const amount = Number(message.match(/(?:不能小于|at least|minimum(?:\s+is)?)\D*([\d]+)/i)?.[1]);
+  return Number.isFinite(amount) && amount > 0 ? Math.ceil(amount) : null;
+}
+
+export function rechargeConversionFromQuote(response, requestedAmount, quotaPerUnit = 500000, quotaDisplayType = 'USD') {
+  if (response?.success === false || response?.ok === false) return null;
+  const paidCny = Number(response?.data ?? response?.amount ?? response?.money);
+  const requested = Number(requestedAmount);
+  const divisor = Number(quotaPerUnit);
+  const tokenDisplay = String(quotaDisplayType || '').toUpperCase() === 'TOKENS';
+  const faceAmountUsd = tokenDisplay ? requested / divisor : requested;
+  if (!Number.isFinite(paidCny) || paidCny <= 0 || !Number.isFinite(faceAmountUsd) || faceAmountUsd <= 0) return null;
+  return {
+    faceAmountUsd,
+    paidCny,
+    cnyPerUsd: paidCny / faceAmountUsd,
+    requestedAmount: requested,
+    source: 'topup_quote'
+  };
+}
+
 function tokenPrices(model, account) {
   let input = model?.inputPriceUsd === null || model?.inputPriceUsd === undefined ? NaN : Number(model.inputPriceUsd);
   let output = model?.outputPriceUsd === null || model?.outputPriceUsd === undefined ? NaN : Number(model.outputPriceUsd);
@@ -92,11 +136,11 @@ function eventNominalUsd(event, account) {
 function emptyCostTotals() {
   return {
     nominalUsd: 0, referenceCny: 0, actualCny: 0, savedCny: 0,
-    pricedRequests: 0, freeCreditEstimates: 0, tokenSplitEstimates: 0
+    pricedRequests: 0, freeCreditEstimates: 0, tokenSplitEstimates: 0, missingConversion: 0
   };
 }
 
-function addCost(target, nominalUsd, referenceCny, actualCny, freeCredit, tokenSplitEstimated) {
+function addCost(target, nominalUsd, referenceCny, actualCny, freeCredit, tokenSplitEstimated, conversionAvailable) {
   target.nominalUsd += nominalUsd;
   target.referenceCny += referenceCny;
   target.actualCny += actualCny;
@@ -104,6 +148,7 @@ function addCost(target, nominalUsd, referenceCny, actualCny, freeCredit, tokenS
   target.pricedRequests += 1;
   if (freeCredit) target.freeCreditEstimates += 1;
   if (tokenSplitEstimated) target.tokenSplitEstimates += 1;
+  if (!conversionAvailable) target.missingConversion += 1;
 }
 
 export function gatewayCostSummary(events = [], accounts = []) {
@@ -127,14 +172,16 @@ export function gatewayCostSummary(events = [], accounts = []) {
       continue;
     }
     const nominalUsd = calculated.nominalUsd;
-    const exchangeRate = Number(account?.usdExchangeRate) > 0 ? Number(account.usdExchangeRate) : 7.2;
+    const quoteRate = Number(account?.topupQuoteConversion?.cnyPerUsd);
     const rechargeRate = Number(account?.rechargeConversion?.cnyPerUsd);
     const hasRecharge = Number.isFinite(rechargeRate) && rechargeRate > 0;
-    const referenceCny = nominalUsd * exchangeRate;
+    const valueRate = Number.isFinite(quoteRate) && quoteRate > 0 ? quoteRate : hasRecharge ? rechargeRate : NaN;
+    const conversionAvailable = Number.isFinite(valueRate) && valueRate > 0;
+    const referenceCny = conversionAvailable ? nominalUsd * valueRate : 0;
     const actualCny = hasRecharge ? nominalUsd * rechargeRate : 0;
     const estimated = !event.billing;
     const target = estimated ? historical : totals;
-    addCost(target, nominalUsd, referenceCny, actualCny, !hasRecharge, calculated.tokenSplitEstimated);
+    addCost(target, nominalUsd, referenceCny, actualCny, !hasRecharge, calculated.tokenSplitEstimated, conversionAvailable);
     (estimated ? historicalSites : coveredSites).add(account.id);
     if (estimated) totals.historicalEstimates += 1;
 
@@ -143,6 +190,7 @@ export function gatewayCostSummary(events = [], accounts = []) {
     if (!breakdown.has(breakdownKey)) breakdown.set(breakdownKey, {
       accountId: account?.id || event.accountId || '', accountName: account?.name || '已删除站点', modelName,
       estimated, billing: calculated.billing, requests: 0, nominalUsd: 0, referenceCny: 0, actualCny: 0, savedCny: 0,
+      conversionAvailable, conversionSource: Number.isFinite(quoteRate) && quoteRate > 0 ? 'topup_quote' : hasRecharge ? 'topup_history' : '',
       inputTokens: 0, outputTokens: 0, totalTokens: 0, tokenSplitEstimates: 0, priceLabels: new Set()
     });
     const row = breakdown.get(breakdownKey);
@@ -151,8 +199,8 @@ export function gatewayCostSummary(events = [], accounts = []) {
     row.inputTokens += Number(event.inputTokens) || 0; row.outputTokens += Number(event.outputTokens) || 0;
     row.totalTokens += Number(event.totalTokens) || (Number(event.inputTokens) || 0) + (Number(event.outputTokens) || 0);
     if (calculated.tokenSplitEstimated) row.tokenSplitEstimates += 1;
-    if (calculated.billing === 'call') row.priceLabels.add(`$${Number(calculated.callPriceUsd).toFixed(6)} / 次`);
-    else row.priceLabels.add(`输入 $${Number(calculated.inputPriceUsd).toFixed(4)} / 1M · 输出 $${Number(calculated.outputPriceUsd).toFixed(4)} / 1M`);
+    if (calculated.billing === 'call') row.priceLabels.add(`${Number(calculated.callPriceUsd).toFixed(6)} 额度 / 次`);
+    else row.priceLabels.add(`输入 ${Number(calculated.inputPriceUsd).toFixed(4)} 额度 / 1M · 输出 ${Number(calculated.outputPriceUsd).toFixed(4)} 额度 / 1M`);
   }
   totals.coveredSites = coveredSites.size;
   totals.historical = { ...historical, coveredSites: historicalSites.size };

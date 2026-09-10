@@ -199,6 +199,9 @@ test('gateway statistics show recharge-adjusted cost and savings', () => {
   assert.match(html, /id="actualCost"/);
   assert.match(html, /id="savedCost"/);
   assert.match(source, /rechargeConversion/);
+  assert.match(source, /topupQuoteConversion/);
+  assert.match(html, /按站点当前充值报价换算/);
+  assert.match(source, /未取得本站充值换算，暂不折算人民币/);
   assert.match(source, /pricedRequests/);
   assert.match(html, /id="historicalSavedCost"/);
   assert.match(html, /id="costBreakdown"/);

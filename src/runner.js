@@ -3,7 +3,7 @@ import net from 'node:net';
 import { decrypt, encrypt, mutateStore, readStore } from './store.js';
 import { accessTokenInBrowser, checkinInBrowser, refreshInBrowser, requestInBrowser } from './browser.js';
 import { readInviteCount, recordInviteCount } from './invite-alerts.js';
-import { rechargeConversionFromTopups } from './cost.js';
+import { minimumTopupFromError, rechargeConversionFromQuote, rechargeConversionFromTopups, topupQuoteRequestAmount } from './cost.js';
 
 const accountRunQueues = new Map();
 
@@ -676,7 +676,21 @@ async function runNewApi(account, action) {
     const topups = await call(account, '/api/user/topup/self?p=0&page_size=20', 'GET', 'newapi', false, '', { allowBrowserRecovery: false });
     rechargeConversion = rechargeConversionFromTopups(topups, quotaPerUnit, quotaDisplayType);
   } catch {}
-  return { balance: formatQuota(rawBalance, config, account.currency || 'auto'), rawBalance, quotaPerUnit, userGroup, quotaDisplayType, usdExchangeRate, rechargeConversion, inviteCount: readInviteCount(data), checkin };
+  let topupQuoteConversion = null;
+  try {
+    const info = await call(account, '/api/user/topup/info', 'GET', 'newapi', false, '', { allowBrowserRecovery: false });
+    let requestedAmount = topupQuoteRequestAmount(info, quotaPerUnit, quotaDisplayType);
+    if (requestedAmount) {
+      let quote = await call(account, '/api/user/amount', 'POST', 'newapi', false, JSON.stringify({ amount: requestedAmount, top_up_code: '' }), { allowBrowserRecovery: false });
+      const correctedMinimum = minimumTopupFromError(quote);
+      if (!rechargeConversionFromQuote(quote, requestedAmount, quotaPerUnit, quotaDisplayType) && correctedMinimum && correctedMinimum !== requestedAmount) {
+        requestedAmount = correctedMinimum;
+        quote = await call(account, '/api/user/amount', 'POST', 'newapi', false, JSON.stringify({ amount: requestedAmount, top_up_code: '' }), { allowBrowserRecovery: false });
+      }
+      topupQuoteConversion = rechargeConversionFromQuote(quote, requestedAmount, quotaPerUnit, quotaDisplayType);
+    }
+  } catch {}
+  return { balance: formatQuota(rawBalance, config, account.currency || 'auto'), rawBalance, quotaPerUnit, userGroup, quotaDisplayType, usdExchangeRate, rechargeConversion, topupQuoteConversion, inviteCount: readInviteCount(data), checkin };
 }
 
 async function runGeneric(account, action) {
@@ -716,6 +730,7 @@ async function runAccountUnlocked(id, action = 'poll') {
     if (result.quotaDisplayType) account.quotaDisplayType = result.quotaDisplayType;
     if (Number(result.usdExchangeRate) > 0) account.usdExchangeRate = Number(result.usdExchangeRate);
     if (result.rechargeConversion) account.rechargeConversion = result.rechargeConversion;
+    if (result.topupQuoteConversion) account.topupQuoteConversion = result.topupQuoteConversion;
     if (result.userGroup) account.userGroup = result.userGroup;
     if (result.inviteCount !== null) {
       observedInviteCount = result.inviteCount;
@@ -746,7 +761,7 @@ async function runAccountUnlocked(id, action = 'poll') {
     const saved = latest.accounts.find(x => x.id === id);
     if (saved) {
       if (account.lastStatus === 'ok' && observedInviteCount !== null) recordInviteCount(latest, saved, observedInviteCount, new Date(account.lastCheckedAt));
-      for (const field of ['balance', 'balanceRaw', 'quotaPerUnit', 'quotaDisplayType', 'usdExchangeRate', 'rechargeConversion', 'userGroup', 'detectedType', 'lastStatus', 'lastError', 'lastCheckedAt', 'lastCheckinAt', 'lastCheckinStatus', 'lastCheckinMessage']) {
+      for (const field of ['balance', 'balanceRaw', 'quotaPerUnit', 'quotaDisplayType', 'usdExchangeRate', 'rechargeConversion', 'topupQuoteConversion', 'userGroup', 'detectedType', 'lastStatus', 'lastError', 'lastCheckedAt', 'lastCheckinAt', 'lastCheckinStatus', 'lastCheckinMessage']) {
         if (Object.hasOwn(account, field)) saved[field] = account[field];
       }
       if (saved.modelPrice?.type === 'per_call') {
